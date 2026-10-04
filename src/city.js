@@ -132,6 +132,9 @@ function tbox(w, h, d, tu = 4, tv = tu) {
   return g;
 }
 const rbox = (w, h, d, r = 0.2, seg = 1) => new RoundedBoxGeometry(w, h, d, seg, Math.min(r, w / 2.05, h / 2.05, d / 2.05));
+// Small facade parts share one source mesh; Batch bakes their transforms into the existing materials.
+const detailBox = new THREE.BoxGeometry(1, 1, 1);
+const branchGeo = new THREE.CylinderGeometry(0.045, 0.09, 1, 6);
 // local frame: world = T(x,y,z) * Ry(rot) * local
 function frame(x, y, z, rot) {
   const base = new THREE.Matrix4().makeRotationY(rot).setPosition(x, y, z);
@@ -396,7 +399,14 @@ export function buildCity(scene, ctx, spawn) {
   mats.led.color.set('#9ee8ff');
   const box = (x, z, w, d, rot, bottom, top, tag) => C.add({ type: 'box', x, z, hw: w / 2, hd: d / 2, rot, bottom, top, tag });
   const tree = (x, y, z, s = 1, cols = G) => {
-    b.add(new THREE.CylinderGeometry(0.14 * s, 0.22 * s, 3.2 * s, 7), mats.bark, M(x, y + 1.6 * s, z));
+    b.add(new THREE.CylinderGeometry(0.11 * s, 0.24 * s, 3.2 * s, 8), mats.bark, M(x, y + 1.6 * s, z));
+    for (const [dx, dz, a] of [[0.32, 0.15, -0.65], [-0.28, -0.18, 0.7]]) {
+      b.add(branchGeo, mats.bark, M(x + dx * s, y + 2.5 * s, z + dz * s, 0.3, 0, a, s, 1.15 * s, s));
+    }
+    for (let k = 0; k < 3; k++) {
+      const a = k / 3 * Math.PI * 2;
+      b.add(branchGeo, mats.bark, M(x + Math.cos(a) * 0.12 * s, y + 0.2 * s, z + Math.sin(a) * 0.12 * s, 0, -a, 0.72, s, 0.5 * s, s));
+    }
     foliage.add(x, y + 3.6 * s, z, 1.5 * s, 1.25 * s, 1.5 * s, cols[Math.floor(R() * cols.length)], R() * 6);
     foliage.add(x + 0.7 * s, y + 3.1 * s, z + 0.3 * s, 1.0 * s, 0.85 * s, 1.0 * s, cols[Math.floor(R() * cols.length)], R() * 6);
     foliage.add(x - 0.6 * s, y + 3.2 * s, z - 0.4 * s, 1.0 * s, 0.85 * s, 1.0 * s, cols[Math.floor(R() * cols.length)], R() * 6);
@@ -512,7 +522,33 @@ export function buildCity(scene, ctx, spawn) {
   }
 
   // ================= buildings =================
-  const glassBand = (F, w, h, ly, lz, tu = 6, tv = 6.6, mat = mats.facade) => b.add(tbox(w, h, 0.14, tu, tv), mat, F(0, ly, lz));
+  const part = (F, mat, px, py, pz, w, h, d) => b.add(detailBox, mat, F(px, py, pz, 0, 0, 0, w, h, d));
+  const glassBand = (F, w, h, ly, lz, tu = 6, tv = 6.6, mat = mats.facade, lx = 0) => {
+    b.add(tbox(w, h, 0.14, tu, tv), mat, F(lx, ly, lz));
+    const face = lz < 0 ? -1 : 1, zf = lz + face * 0.12;
+    // A dark reveal behind projecting frame edges reads as a recessed window at street distance.
+    for (const sy of [-1, 1]) {
+      part(F, mats.dark, lx, ly + sy * (h / 2 + 0.025), lz + face * 0.07, w + 0.22, 0.08, 0.09);
+      part(F, mats.trim, lx, ly + sy * (h / 2 + 0.05), zf, w + 0.24, 0.12, 0.2);
+    }
+    const panes = Math.min(6, Math.max(2, Math.ceil(w / 2.1)));
+    for (let k = 0; k <= panes; k++) {
+      part(F, mats.trim, lx - w / 2 + k * w / panes, ly, zf, k === 0 || k === panes ? 0.14 : 0.065, h, 0.16);
+    }
+    part(F, mats.steel, lx, ly + h * 0.22, zf, w, 0.05, 0.12);
+  };
+  const curtainFrame = (F, w, h, d, y) => {
+    // Bounded architectural grid on all four elevations; floor textures still supply fine window detail.
+    for (const sz of [-1, 1]) {
+      const n = Math.min(6, Math.max(2, Math.ceil(w / 3)));
+      for (let k = 0; k <= n; k++) part(F, mats.trim, -w / 2 + k * w / n, y, sz * (d / 2 + 0.055), 0.1, h, 0.13);
+      for (const sy of [-1, 1]) part(F, mats.dark, 0, y + sy * (h / 2 - 0.09), sz * (d / 2 + 0.02), w, 0.12, 0.08);
+    }
+    for (const sx of [-1, 1]) {
+      const n = Math.min(5, Math.max(2, Math.ceil(d / 3)));
+      for (let k = 0; k <= n; k++) part(F, mats.trim, sx * (w / 2 + 0.055), y, -d / 2 + k * d / n, 0.13, h, 0.1);
+    }
+  };
   const railRun = (F, x0, z0, x1, z1, y) => { const L = Math.hypot(x1 - x0, z1 - z0), a = Math.atan2(x1 - x0, z1 - z0); b.add(tbox(0.05, 1.0, L, 2), mats.glassClear, F((x0 + x1) / 2, y + 0.5, (z0 + z1) / 2, 0, a, 0)); b.add(rbox(0.1, 0.08, L, 0.03), mats.trim, F((x0 + x1) / 2, y + 1.02, (z0 + z1) / 2, 0, a, 0)); };
   const solarArray = (F, cx, y, cz, nx, nz) => { for (let i = 0; i < nx; i++) for (let k = 0; k < nz; k++) { const px = cx + (i - (nx - 1) / 2) * 1.15, pz = cz + (k - (nz - 1) / 2) * 1.8; b.add(new THREE.BoxGeometry(1.05, 0.05, 1.6), mats.solar, F(px, y + 0.45, pz, -0.32, 0, 0)); b.add(new THREE.BoxGeometry(0.06, 0.45, 0.06), mats.steel, F(px, y + 0.22, pz + 0.55)); } };
 
@@ -528,6 +564,9 @@ export function buildCity(scene, ctx, spawn) {
     glassBand(F, W * 0.86, 2.7, 0.15 + 1.45, -D / 2 - 0.02);
     b.add(tbox(W * 0.24, 2.9, 0.12, 2), mats.wood, F(-W * 0.36, 0.15 + 1.55, D / 2 + 0.03));
     b.add(rbox(1.15, 2.35, 0.12, 0.04), acc, F(W * 0.38, 0.15 + 1.2, D / 2 + 0.05));
+    for (const sx of [-1, 1]) part(F, mats.dark, W * 0.38 + sx * 0.64, 1.35, D / 2 + 0.06, 0.1, 2.5, 0.13);
+    part(F, mats.dark, W * 0.38, 2.62, D / 2 + 0.06, 1.38, 0.11, 0.13);
+    for (let k = 0; k < 5; k++) part(F, mats.dark, -W * 0.36 - W * 0.09 + k * W * 0.045, 1.7, D / 2 + 0.105, 0.035, 2.75, 0.065);
     b.add(rbox(0.08, 0.5, 0.1, 0.03), mats.steel, F(W * 0.38 - 0.4, 1.3, D / 2 + 0.13));
     b.add(rbox(2.6, 0.18, 1.6, 0.08), mats.trim, F(W * 0.38, 2.85, D / 2 + 0.8));
     b.add(new THREE.BoxGeometry(2.4, 0.04, 0.06), mats.led, F(W * 0.38, 2.75, D / 2 + 1.58));
@@ -543,8 +582,8 @@ export function buildCity(scene, ctx, spawn) {
     const y2 = h1 + 0.5, h2 = 2.9;
     if (v === 1) b.add(rbox(uw, h2, ud, 1.3, 4), mats.panel, F(ux, y2 + h2 / 2, uz));
     else b.add(tbox(uw, h2, ud, 4), mats.panel, F(ux, y2 + h2 / 2, uz));
-    glassBand(F, uw * (v === 1 ? 0.7 : 0.9), 2.3, y2 + 1.3, uz + ud / 2 + 0.03);
-    glassBand(F, uw * 0.7, 2.3, y2 + 1.3, uz - ud / 2 - 0.03);
+    glassBand(F, uw * (v === 1 ? 0.7 : 0.9), 2.3, y2 + 1.3, uz + ud / 2 + 0.03, 6, 6.6, mats.facade, ux);
+    glassBand(F, uw * 0.7, 2.3, y2 + 1.3, uz - ud / 2 - 0.03, 6, 6.6, mats.facade, ux);
     if (v !== 1) { b.add(tbox(0.14, 2.2, ud * 0.5, 6, 6.6), mats.facade, F(ux + uw / 2 + 0.02, y2 + 1.3, uz)); }
     b.add(rbox(uw + 0.8, 0.32, ud + 0.8, 0.14), mats.trim, F(ux, y2 + h2 + 0.16, uz));
     // roof: green roof + solar array, terrace railing on the lower roof
@@ -580,11 +619,21 @@ export function buildCity(scene, ctx, spawn) {
     b.add(tbox(W + 2, 0.6, D + 2, 2), mats.pave, F(0, -0.15, 0));
     // lobby: double-height glass, entrance canopy with the building number
     b.add(tbox(W - 1, 4.4, D - 1, 6, 4.4), fac, F(0, 2.35, 0));
+    curtainFrame(F, W - 1, 4.3, D - 1, 2.35);
+    // Entrance glazing has a separate portal, twin leaves and handles rather than a flat wall.
+    part(F, mats.dark, 0, 1.6, D / 2 - 0.42, 3.2, 2.8, 0.08);
+    for (const sx of [-1, 1]) {
+      part(F, mats.glass, sx * 0.72, 1.6, D / 2 - 0.32, 1.34, 2.55, 0.06);
+      part(F, mats.trim, sx * 1.57, 1.6, D / 2 - 0.2, 0.12, 2.9, 0.18);
+      part(F, mats.steel, sx * 0.13, 1.6, D / 2 - 0.24, 0.055, 0.48, 0.07);
+    }
+    part(F, mats.trim, 0, 3.08, D / 2 - 0.2, 3.28, 0.16, 0.18);
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) b.add(rbox(0.6, 4.6, 0.6, 0.15), mats.trim, F(sx * (W / 2 - 0.6), 2.4, sz * (D / 2 - 0.6)));
     b.add(rbox(6, 0.3, 3.2, 0.12), mats.trim, F(0, 4.1, D / 2 + 1.4));
     b.add(new THREE.BoxGeometry(5.6, 0.04, 0.06), mats.led, F(0, 3.93, D / 2 + 2.98));
     // glass core
     b.add(tbox(W - 2.6, NF * fh, D - 2.6, 12, 13.2), fac, F(0, y0 + NF * fh / 2, 0));
+    curtainFrame(F, W - 2.6, NF * fh, D - 2.6, y0 + NF * fh / 2);
     // wavy balcony slabs, glass railings, planters
     let maxW = W, maxD = D;
     for (let f = 0; f <= NF; f++) {
@@ -593,6 +642,10 @@ export function buildCity(scene, ctx, spawn) {
       const fy = y0 + f * fh;
       b.add(rbox(bw, 0.32, bd, 1.0, 2), mats.trim, F(0, fy, 0));
       if (f === NF) break;
+      for (const sz of [-1, 1]) {
+        part(F, mats.dark, 0, fy + 0.2, sz * ((D - 2.6) / 2 + 0.07), W - 2.6, 0.13, 0.09);
+        for (const sx of [-1, 1]) part(F, mats.steel, sx * (bw / 2 - 1.15), fy + 0.68, sz * (bd / 2 - 0.1), 0.05, 1.02, 0.08);
+      }
       for (const sz of [-1, 1]) {
         b.add(tbox(bw - 2.2, 1.0, 0.05, 2), mats.glassClear, F(0, fy + 0.66, sz * (bd / 2 - 0.1)));
         b.add(rbox(bw - 2.2, 0.06, 0.08, 0.03), mats.trim, F(0, fy + 1.18, sz * (bd / 2 - 0.1)));
@@ -618,12 +671,18 @@ export function buildCity(scene, ctx, spawn) {
     const { x, z, y } = L, F = frame(x, y, z, L.rot);
     b.add(new THREE.CylinderGeometry(6.4, 6.6, 0.6, 40), mats.pave, F(0, -0.15, 0));
     b.add(new THREE.CylinderGeometry(4.6, 4.6, 3.0, 40, 1, true), mats.glassClear, F(0, 1.65, 0));
+    b.add(new THREE.CylinderGeometry(4.68, 4.68, 0.26, 40, 1, true), mats.wood, F(0, 0.4, 0));
+    b.add(new THREE.TorusGeometry(4.62, 0.06, 6, 40), mats.steel, F(0, 2.7, 0, Math.PI / 2));
     for (let k = 0; k < 12; k++) { const a = k / 12 * Math.PI * 2; b.add(rbox(0.12, 3.1, 0.12, 0.04), mats.trim, F(Math.cos(a) * 4.6, 1.7, Math.sin(a) * 4.6)); }
     // floating roof disc with a soft rim and a skylight
     b.add(new THREE.CylinderGeometry(6.8, 6.4, 0.45, 48), mats.trim, F(0, 3.45, 0));
     b.add(new THREE.TorusGeometry(6.6, 0.22, 8, 48), mats.trim, F(0, 3.45, 0, Math.PI / 2, 0, 0));
     b.add(new THREE.CylinderGeometry(1.8, 1.8, 0.1, 24), mats.glassClear, F(0, 3.7, 0));
     b.add(new THREE.TorusGeometry(6.55, 0.05, 6, 48), mats.led, F(0, 3.18, 0, Math.PI / 2, 0, 0));
+    for (let k = 0; k < 8; k++) {
+      const a = k / 8 * Math.PI * 2;
+      b.add(detailBox, mats.dark, F(Math.cos(a) * 4.0, 3.17, Math.sin(a) * 4.0, 0, -a, 0, 4.4, 0.09, 0.12));
+    }
     // counter, stools, interior plants
     b.add(rbox(3.4, 1.05, 0.9, 0.2), mats.wood, F(0, 0.65, -1.6));
     b.add(rbox(3.6, 0.08, 1.1, 0.04), mats.trim, F(0, 1.2, -1.6));
@@ -651,6 +710,8 @@ export function buildCity(scene, ctx, spawn) {
       const s = 1 - f * 0.14, fy = f * 4.2, w = W * s, d = D * s;
       b.add(rbox(w + 0.6, 0.6, d + 0.6, 0.25), mats.trim, F(0, fy + 0.3, 0));
       b.add(tbox(w - 0.6, 3.6, d - 0.6, 12, 13.2), mats.facade, F(0, fy + 2.4, 0));
+      curtainFrame(F, w - 0.6, 3.45, d - 0.6, fy + 2.4);
+      for (const sz of [-1, 1]) part(F, mats.trim, 0, fy + 4.13, sz * ((d - 0.6) / 2 + 0.04), w - 0.4, 0.14, 0.22);
       for (let k = 0; k < 12; k++) { const u = (k / 11 - 0.5) * (w - 1); shrub(...wp(x, z, rot, u, d / 2 + 0.05).flatMap((v, i) => i === 0 ? [v, y + fy + 0.55] : [v]), 0.5); }
       b.add(tbox(w + 0.2, 0.5, 0.5, 2), mats.curb, F(0, fy + 0.6, d / 2 + 0.05));
     }

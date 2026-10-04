@@ -3,10 +3,49 @@ import { nearFade } from './nearfade.js';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { fbm, rng, ss } from './noise.js';
 import { H, H0, slope, coastX, FALL_Z, ISLANDS, streamCarve , reserved } from './terrain.js';
-import { Batch, Blobs, M, latheGeo } from './geo.js';
+import { Batch, Blobs } from './geo.js';
 import { makeFallMaterial } from './water.js';
 
 const LEAF_GREENS = ['#7fc23a', '#93cf45', '#6cb135', '#a5d957', '#5f9f30', '#88c84a'];
+
+// Closed, tapered wood following a curve. A few longitudinal ridges catch the
+// light without bark textures; static pieces are merged into the existing batch.
+function woodGeo(curve, radius, tip, segments = 6, sides = 8, flare = 0, phase = 0) {
+  const pos = [], idx = [];
+  const frames = curve.computeFrenetFrames(segments, false);
+  const p = new THREE.Vector3();
+  for (let j = 0; j <= segments; j++) {
+    const t = j / segments;
+    const c = curve.getPoint(t);
+    const r = radius * (1 - t) + tip * t + flare * Math.pow(1 - t, 7);
+    for (let k = 0; k < sides; k++) {
+      const a = k / sides * Math.PI * 2;
+      const ridge = 1 + 0.055 * Math.sin(a * 3 + phase + t * 0.5);
+      p.copy(c).addScaledVector(frames.normals[j], Math.cos(a) * r * ridge)
+        .addScaledVector(frames.binormals[j], Math.sin(a) * r * ridge);
+      pos.push(p.x, p.y, p.z);
+    }
+  }
+  for (let j = 0; j < segments; j++) for (let k = 0; k < sides; k++) {
+    const a = j * sides + k, b = j * sides + (k + 1) % sides;
+    const c = a + sides, d = b + sides;
+    idx.push(a, b, c, b, d, c);
+  }
+  for (let end = 0; end < 2; end++) {
+    const t = end, center = pos.length / 3, c = curve.getPoint(t);
+    pos.push(c.x, c.y, c.z);
+    const ring = end * segments * sides;
+    for (let k = 0; k < sides; k++) {
+      const a = ring + k, b = ring + (k + 1) % sides;
+      if (end) idx.push(center, a, b); else idx.push(center, b, a);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
 
 export function rockGeo(seed) {
   let g = new THREE.IcosahedronGeometry(1, 3);
@@ -18,12 +57,16 @@ export function rockGeo(seed) {
   for (let i = 0; i < p.count; i++) {
     v.fromBufferAttribute(p, i);
     const n = fbm(v.x * 1.4 + seed * 7.1, v.z * 1.4 + v.y * 1.7, 4, seed);
-    let s = 0.72 + 0.5 * n;
+    // Broad erosion planes and narrow sediment bands retain the original mesh
+    // budget, while separating a coastal boulder from a uniformly round blob.
+    const strata = Math.sin(v.y * 14 + v.x * 2 + seed * 1.7);
+    const s = 0.72 + 0.5 * n + strata * 0.025;
     v.multiplyScalar(s);
     if (v.y < -0.25) v.y = -0.25 + (v.y + 0.25) * 0.35;
     if (v.y > 0.55) v.y = 0.55 + (v.y - 0.55) * 0.55;
     p.setXYZ(i, v.x, v.y, v.z);
     c.copy(base).lerp(dark, ss(0.45, 0.25, n) + ss(0.1, -0.3, v.y) * 0.5);
+    c.multiplyScalar(0.96 + 0.065 * ss(-0.35, 0.8, strata));
     col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
   }
   g.computeVertexNormals();
@@ -38,23 +81,30 @@ export function rockGeo(seed) {
 }
 
 function leafTexture() {
-  const S = 128; const cv = document.createElement('canvas'); cv.width = cv.height = S;
+  const S = 256; const cv = document.createElement('canvas'); cv.width = cv.height = S;
   const g = cv.getContext('2d');
+  g.scale(2, 2);
   const leaf = (x, y, a, len, wid, c1, c2) => {
     g.save(); g.translate(x, y); g.rotate(a);
     const gr = g.createLinearGradient(0, -len / 2, 0, len / 2);
     gr.addColorStop(0, c1); gr.addColorStop(1, c2);
     g.fillStyle = gr;
     g.beginPath(); g.moveTo(0, -len / 2);
-    g.quadraticCurveTo(wid, -len * 0.1, 0, len / 2);
-    g.quadraticCurveTo(-wid, -len * 0.1, 0, -len / 2);
+    g.quadraticCurveTo(wid, -len * 0.16, 0, len / 2);
+    g.quadraticCurveTo(-wid * 0.86, -len * 0.04, 0, -len / 2);
     g.fill();
-    g.strokeStyle = 'rgba(70,110,30,0.55)'; g.lineWidth = 1.2;
+    g.strokeStyle = 'rgba(47,92,29,0.48)'; g.lineWidth = 0.8;
     g.beginPath(); g.moveTo(0, -len / 2 + 3); g.lineTo(0, len / 2 - 2); g.stroke();
+    g.lineWidth = 0.4;
+    for (let i = -1; i <= 1; i++) {
+      const vy = i * len * 0.16;
+      g.beginPath(); g.moveTo(0, vy + 4); g.lineTo(wid * 0.6, vy - 4);
+      g.moveTo(0, vy + 4); g.lineTo(-wid * 0.5, vy - 3); g.stroke();
+    }
     g.restore();
   };
   const L = [[64, 40, 0.1], [36, 64, -1.2], [92, 66, 1.25], [52, 92, -2.6], [80, 94, 2.5], [64, 66, 0.6]];
-  for (const [x, y, a] of L) leaf(x, y, a, 46, 17, '#e6f58e', '#86c43e');
+  for (const [x, y, a] of L) leaf(x, y, a, 46, 17, '#c9e987', '#609f3c');
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
@@ -191,20 +241,60 @@ export function buildNature(scene, ctx) {
   });
 
   // ---------- Trees ----------
-  const bark = nearFade(new THREE.MeshLambertMaterial({ color: '#8d6b4f' }));
+  const bark = nearFade(new THREE.MeshLambertMaterial({ color: '#806247' }));
   const trunkBatch = new Batch();
+  // Additional modeling has its own random stream: scenery placement, collision
+  // shapes, leaf cards, grass and the waterfall keep their existing sequence.
+  const detailR = rng(61743);
+  const lowWood = quality === 'low';
   const leafCards = [];
   const tmpQ = new THREE.Quaternion(), tmpE = new THREE.Euler();
+
+  const roots = (x, y, z, s, radius) => {
+    const phase = detailR() * Math.PI * 2;
+    const count = quality === 'high' ? 3 : 2;
+    for (let i = 0; i < count; i++) {
+      const a = phase + i / count * Math.PI * 2;
+      const r = radius * 0.86;
+      const p0 = new THREE.Vector3(x, y + 0.5 * s, z);
+      const p1 = new THREE.Vector3(x + Math.cos(a) * r * 0.72, y + 0.14 * s, z + Math.sin(a) * r * 0.72);
+      const p2 = new THREE.Vector3(x + Math.cos(a) * r, y + 0.025 * s, z + Math.sin(a) * r);
+      trunkBatch.add(woodGeo(new THREE.QuadraticBezierCurve3(p0, p1, p2), 0.09 * s, 0.018 * s,
+        lowWood ? 2 : 3, lowWood ? 4 : 5), bark);
+    }
+  };
 
   const blobTree = (x, z, s = 1) => {
     const y = H(x, z) - 0.2;
     const h = (3.2 + R() * 2.4) * s;
-    trunkBatch.add(new THREE.CylinderGeometry(0.16 * s, 0.28 * s, h, 6), bark, M(x, y + h / 2, z));
+    const bendX = (detailR() - 0.5) * 0.22 * s, bendZ = (detailR() - 0.5) * 0.22 * s;
+    const stem = new THREE.QuadraticBezierCurve3(new THREE.Vector3(x, y, z),
+      new THREE.Vector3(x - bendX * 0.35, y + h * 0.5, z - bendZ * 0.35),
+      new THREE.Vector3(x + bendX, y + h, z + bendZ));
+    trunkBatch.add(woodGeo(stem, 0.245 * s, 0.085 * s, lowWood ? 4 : 6, lowWood ? 6 : 8,
+      0.055 * s, detailR() * 6), bark);
+    roots(x, y, z, s, 0.35 * s);
     const n = 3 + Math.floor(R() * 3);
     for (let i = 0; i < n; i++) {
       const a = R() * Math.PI * 2, rr = (i === 0 ? 0 : 0.9 + R() * 0.6) * s;
       const sz = (1.3 + R() * 0.9) * s;
-      foliage.add(x + Math.cos(a) * rr, y + h + (i === 0 ? 0.4 : -0.3 + R() * 0.9) * s, z + Math.sin(a) * rr, sz, sz * 0.85, sz, LEAF_GREENS[Math.floor(R() * LEAF_GREENS.length)], R() * 6);
+      const cx = x + Math.cos(a) * rr, cy = y + h + (i === 0 ? 0.4 : -0.3 + R() * 0.9) * s, cz = z + Math.sin(a) * rr;
+      const color = LEAF_GREENS[Math.floor(R() * LEAF_GREENS.length)], rot = R() * 6;
+      foliage.add(cx, cy, cz, sz, sz * 0.85, sz, color, rot);
+      if (i > 0) {
+        const p0 = stem.getPoint(0.65);
+        const p2 = new THREE.Vector3(cx, cy - sz * 0.35, cz);
+        const p1 = p0.clone().lerp(p2, 0.5).add(new THREE.Vector3(0, -0.15 * s, 0));
+        trunkBatch.add(woodGeo(new THREE.QuadraticBezierCurve3(p0, p1, p2), 0.085 * s, 0.024 * s,
+          lowWood ? 2 : 3, lowWood ? 4 : 5), bark);
+      }
+    }
+    // A compact sunlit tier breaks up the crown silhouette without adding leaf
+    // cards or changing the tree's original position/collision envelope.
+    const crownColor = LEAF_GREENS[[1, 3, 5][Math.floor(detailR() * 3)]], crownRot = detailR() * 6;
+    if (quality === 'high' || Math.hypot(x - spawn.x, z - spawn.z) < 165) {
+      foliage.add(x + bendX, y + h + 0.92 * s, z + bendZ, 0.95 * s, 0.6 * s, 0.88 * s,
+        crownColor, crownRot);
     }
     colliders.add({ type: 'cyl', x, z, r: 0.35 * s, top: y + h * 0.7, bottom: y - 1, tag: 'tree' });
     colliders.add({ type: 'ell', x, y: y + h + 0.35 * s, z, rx: 1.75 * s, ry: 1.25 * s, rz: 1.75 * s, bottom: y + h - 0.7 * s, tag: 'tree' });
@@ -214,22 +304,29 @@ export function buildNature(scene, ctx) {
     const y = H(x, z) - 0.25;
     const h = (big ? 9.5 : 5.5 + R() * 2.5) * s;
     const lean = (R() - 0.5) * 0.12;
-    trunkBatch.add(latheGeo(h * 0.8, (big ? 0.5 : 0.3) * s, (t) => 1 - 0.6 * t, 8, 6), bark, M(x, y, z, lean, 0, lean * 0.7));
+    const stem = new THREE.QuadraticBezierCurve3(new THREE.Vector3(x, y, z),
+      new THREE.Vector3(x - lean * h * 0.12, y + h * 0.4, z + lean * h * 0.18),
+      new THREE.Vector3(x - lean * h * 0.56, y + h * 0.8, z + lean * h * 0.8));
+    trunkBatch.add(woodGeo(stem, (big ? 0.39 : 0.28) * s, (big ? 0.12 : 0.075) * s,
+      big || !lowWood ? 8 : 6, big || !lowWood ? 8 : 6, (big ? 0.075 : 0.09) * s, detailR() * 6), bark);
+    roots(x, y, z, s, 0.5 * s);
     const tops = [];
     const nb = big ? 7 : 4 + Math.floor(R() * 2);
     for (let i = 0; i < nb; i++) {
       const a = i / nb * Math.PI * 2 + R() * 0.6;
       const hy = y + h * (0.42 + R() * 0.3);
       const len = (big ? 4.2 : 2.2) * s * (0.8 + R() * 0.5);
-      const p0 = new THREE.Vector3(x, hy, z);
+      const p0 = stem.getPoint((hy - y) / (h * 0.8));
       const p2 = new THREE.Vector3(x + Math.cos(a) * len, hy + len * (0.45 + R() * 0.35), z + Math.sin(a) * len);
       const p1 = p0.clone().lerp(p2, 0.5).add(new THREE.Vector3(0, -0.3, 0));
-      trunkBatch.add(new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(p0, p1, p2), 6, (big ? 0.18 : 0.1) * s, 5), bark);
+      trunkBatch.add(woodGeo(new THREE.QuadraticBezierCurve3(p0, p1, p2),
+        (big ? 0.18 : 0.1) * s, (big ? 0.03 : 0.018) * s, big || !lowWood ? 6 : 4, 5), bark);
       tops.push([p2, (big ? 2.6 : 1.7) * s * (0.85 + R() * 0.35)]);
     }
     tops.push([new THREE.Vector3(x, y + h * 0.95, z), (big ? 3.0 : 2.0) * s]);
     for (const [c, rc] of tops) {
-      foliage.add(c.x, c.y, c.z, rc * 0.78, rc * 0.62, rc * 0.78, '#4f8f2c', R() * 6);
+      foliage.add(c.x, c.y, c.z, rc * 0.78, rc * 0.62, rc * 0.78,
+        LEAF_GREENS[Math.floor(detailR() * 3)], R() * 6);
       const nl = Math.round(rc * rc * (big ? 34 : 38));
       for (let k = 0; k < nl; k++) {
         let px, py, pz;

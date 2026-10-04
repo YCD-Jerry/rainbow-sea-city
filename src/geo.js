@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // Collects static geometry per material and merges it into few draw calls.
 export class Batch {
@@ -106,6 +106,29 @@ export function ribbonGeo(points, width, thickFn) {
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setIndex(idx);
   g.computeVertexNormals();
+  return g;
+}
+
+// One reusable canopy for trees, hedges and balcony planting. Rounded lobes and
+// a baked underside tint add depth without more triangles or extra draw calls.
+export function foliageGeo() {
+  const source = new THREE.IcosahedronGeometry(1, 2);
+  source.deleteAttribute('normal'); source.deleteAttribute('uv');
+  const g = mergeVertices(source); source.dispose();
+  const p = g.attributes.position, colors = new Float32Array(p.count * 3);
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const a = Math.atan2(z, x);
+    const r = Math.min(1, 0.94 + 0.045 * Math.sin(a * 5 + y * 2)
+      + 0.02 * Math.cos(a * 8 - y * 3) + 0.025 * Math.sin(y * 8));
+    p.setXYZ(i, x * r, y * r, z * r);
+    const t = THREE.MathUtils.smoothstep(y, -0.85, 0.8);
+    colors[i * 3] = 0.68 + 0.32 * t;
+    colors[i * 3 + 1] = 0.76 + 0.24 * t;
+    colors[i * 3 + 2] = 0.70 + 0.30 * t;
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  g.computeVertexNormals(); g.computeBoundingSphere();
   return g;
 }
 

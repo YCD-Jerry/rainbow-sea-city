@@ -18,7 +18,7 @@ import { DayNight, fmtTime, MAX_SKIP } from './daynight.js';
 import { Achievements, ACH, ACH_CATS, ACH_ICON } from './achievements.js';
 import { buildNature } from './nature.js';
 import { nearFade } from './nearfade.js';
-import { Blobs } from './geo.js';
+import { Blobs, foliageGeo } from './geo.js';
 import { Player, CHARS, CHAR_IDS } from './player.js';
 import { FX } from './fx.js';
 import { Combat } from './combat.js';
@@ -123,7 +123,7 @@ async function boot(saved = {}) {
   await tick();
   const colliders = new Colliders(16);
   const mats = makeMaterials();
-  const foliage = new Blobs(new THREE.IcosahedronGeometry(1, 2));
+  const foliage = new Blobs(foliageGeo());
   const ctx = { colliders, mats, foliage, timeU, quality, spawn, tips: [] };
   const st = buildStructures(scene, ctx);
   setProgress(0.52, '海湾新城');
@@ -135,7 +135,7 @@ async function boot(saved = {}) {
   setProgress(0.58, '树林、花与礁石');
   await tick();
   const nat = buildNature(scene, ctx);
-  const folMesh = foliage.build(scene, nearFade(new THREE.MeshLambertMaterial({ color: '#ffffff' }), 0.6, 2.2));
+  const folMesh = foliage.build(scene, nearFade(new THREE.MeshLambertMaterial({ color: '#ffffff', vertexColors: true }), 0.6, 2.2));
 
   setProgress(0.72, '神像、魔物与宝箱');
   await tick();

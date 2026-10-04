@@ -5,6 +5,28 @@ import { H, rawH0, addPad, coastX, ISLANDS } from './terrain.js';
 import { rng } from './noise.js';
 
 const GREENS = ['#6db83a', '#85c94a', '#5aa232', '#9fd65a', '#4f9330'];
+const detailBox = new THREE.BoxGeometry(1, 1, 1);
+
+function localFrame(x, y, z, rot) {
+  const base = new THREE.Matrix4().makeRotationY(rot).setPosition(x, y, z);
+  return (lx, ly, lz, w, h, d) => base.clone().multiply(M(lx, ly, lz, 0, 0, 0, w, h, d));
+}
+
+// A narrow surface strip follows the tower profile instead of floating outside its tapered shell.
+function profileStrip(h, r, prof, a, width, t0 = 0.1, t1 = 0.8, steps = 24) {
+  const pos = [], idx = [];
+  for (let k = 0; k <= steps; k++) {
+    const t = t0 + (t1 - t0) * k / steps, rr = r * prof(t) + 0.045;
+    for (const side of [-1, 1]) {
+      const ang = a + side * width / 2;
+      pos.push(Math.cos(ang) * rr, h * t, Math.sin(ang) * rr);
+    }
+    if (k < steps) { const n = k * 2; idx.push(n, n + 2, n + 1, n + 1, n + 2, n + 3); }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
+  return g;
+}
 
 export function makeMaterials() {
   return {
@@ -16,6 +38,7 @@ export function makeMaterials() {
     glassClear: new THREE.MeshStandardMaterial({ color: '#c8f1ff', roughness: 0.03, metalness: 0.25, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide, envMapIntensity: 2.0 }),
     gold: new THREE.MeshStandardMaterial({ color: '#e9c77b', roughness: 0.3, metalness: 0.6 }),
     crystal: new THREE.MeshStandardMaterial({ color: '#7fe9ff', emissive: '#3fd8ff', emissiveIntensity: 1.6, roughness: 0.2, metalness: 0.1, transparent: true, opacity: 0.92 }),
+    roofGarden: new THREE.MeshLambertMaterial({ color: '#7cc24c' }),
   };
 }
 
@@ -49,6 +72,9 @@ function greenTower(b, ctx, x, y0, z, r, h, R) {
   b.add(new THREE.CylinderGeometry(r + 1.5, r + 1.8, 4.2, 40), mats.plaza, M(x, y0 - 1.6, z));
   b.add(new THREE.CylinderGeometry(r + 1.25, r + 1.25, 3.2, 40, 1, true), mats.glassDark, M(x, y0 + 1.9, z));
   b.add(new THREE.CylinderGeometry(r * 0.94, r, h, 36, 1, true), mats.glass, M(x, y0 + h / 2, z));
+  const taper = (t) => 1 - 0.06 * t;
+  for (let k = 0; k < 18; k++) b.add(profileStrip(h, r, taper, k / 18 * Math.PI * 2, 0.018, 0.09, 0.97, 1), mats.whiteMatte, M(x, y0, z));
+  b.add(new THREE.CylinderGeometry(r + 1.35, r + 1.35, 0.18, 40, 1, true), mats.whiteMatte, M(x, y0 + 3.35, z));
   for (let fy = 3.4; fy < h - 1; fy += 3.6) {
     b.add(new THREE.CylinderGeometry(r + 1.1, r + 1.0, 0.45, 40), mats.white, M(x, y0 + fy, z));
     const n = Math.round((r + 1) * 3.3);
@@ -65,6 +91,7 @@ function greenTower(b, ctx, x, y0, z, r, h, R) {
     b.add(new THREE.BoxGeometry(0.4, h, 0.8), mats.white, M(x + Math.cos(a) * (r + 0.25), y0 + h / 2, z + Math.sin(a) * (r + 0.25), 0, -a, 0));
   }
   b.add(new THREE.SphereGeometry(r + 1.1, 36, 12, 0, Math.PI * 2, 0, Math.PI / 2), mats.white, M(x, y0 + h, z, 0, 0, 0, 1, 0.32, 1));
+  b.add(new THREE.TorusGeometry(r + 0.94, 0.09, 6, 40), mats.glassDark, M(x, y0 + h - 0.06, z, Math.PI / 2));
   colliders.add({ type: 'cyl', x, z, r: r + 1.1, top: y0 + h, bottom: y0 - 3 });
   colliders.add({ type: 'ell', x, y: y0 + h, z, rx: r + 1.1, ry: (r + 1.1) * 0.32, rz: r + 1.1, bottom: y0 + h - 0.2 });
 }
@@ -104,11 +131,17 @@ export function dome(b, ctx, x, y, z, r, trees = true) {
   for (let k = 0; k < 7; k++) b.add(new THREE.TorusGeometry(r, 0.13, 6, 44, Math.PI), mats.white, M(x, y, z, 0, k / 7 * Math.PI, 0));
   for (const phi of [0.33, 0.68, 1.02, 1.3]) b.add(new THREE.TorusGeometry(r * Math.cos(phi), 0.11, 6, 48), mats.white, M(x, y + r * Math.sin(phi), z, Math.PI / 2, 0, 0));
   b.add(new THREE.CylinderGeometry(r + 0.6, r + 1.0, 4.6, 48), mats.white, M(x, y - 1.4, z));
+  b.add(new THREE.TorusGeometry(r + 0.53, 0.08, 6, 48), mats.glassDark, M(x, y + 0.88, z, Math.PI / 2));
   {
     const a = (x * 0.37 + z * 0.11) % (Math.PI * 2), ex = x + Math.cos(a) * (r + 1.2), ez = z + Math.sin(a) * (r + 1.2), rot = Math.PI / 2 - a;
     b.add(new THREE.BoxGeometry(4.2, 3.2, 3.2), mats.glassClear, M(ex, y + 2.4, ez, 0, rot, 0));
     b.add(new RoundedBoxGeometry(4.8, 0.35, 3.8, 2, 0.15), mats.white, M(ex, y + 4.1, ez, 0, rot, 0));
     for (const sx of [-1, 1]) b.add(new THREE.BoxGeometry(0.25, 3.2, 3.4), mats.white, M(ex + Math.cos(rot) * sx * 2.2, y + 2.4, ez - Math.sin(rot) * sx * 2.2, 0, rot, 0));
+    const F = localFrame(ex, y, ez, rot);
+    b.add(detailBox, mats.glassDark, F(0, 2.25, 1.62, 3.9, 2.7, 0.06));
+    for (const sx of [-1, 0, 1]) b.add(detailBox, mats.white, F(sx * 1.95, 2.25, 1.72, 0.1, 2.8, 0.12));
+    b.add(detailBox, mats.white, F(0, 3.65, 1.72, 4, 0.12, 0.14));
+    for (const sx of [-1, 1]) b.add(detailBox, mats.gold, F(sx * 0.18, 2.25, 1.79, 0.05, 0.5, 0.07));
     colliders.add({ type: 'box', x: ex, z: ez, hw: 2.4, hd: 1.9, rot, top: y + 4.3, bottom: y - 1 });
   }
   if (trees) {
@@ -125,10 +158,15 @@ function spire(b, ctx, x, y0, z, h, r, opts = {}) {
   const { mats, colliders } = ctx;
   const prof = (t) => Math.pow(1 - t, 1.15) * (1 + 0.3 * Math.sin(t * Math.PI * 2.6) * (1 - t)) + 0.004;
   b.add(latheGeo(h, r, prof, 28, 64), mats.white, M(x, y0, z));
+  for (let k = 0; k < 8; k++) b.add(profileStrip(h, r, prof, k / 8 * Math.PI * 2, 0.045, 0.08, 0.8), mats.glassDark, M(x, y0, z));
   // grounded: plinth below, a glazed lobby ring and an entrance canopy at street level
   b.add(new THREE.CylinderGeometry(r + 1.6, r + 2.0, 4.4, 32), mats.plaza, M(x, y0 - 1.8, z));
   b.add(new THREE.CylinderGeometry(r + 0.45, r + 0.45, 3.4, 32, 1, true), mats.glassDark, M(x, y0 + 2.1, z));
   b.add(new THREE.CylinderGeometry(r + 0.9, r + 0.9, 0.35, 32), mats.white, M(x, y0 + 3.95, z));
+  for (let k = 0; k < 12; k++) {
+    const a = k / 12 * Math.PI * 2;
+    b.add(detailBox, mats.whiteMatte, M(x + Math.cos(a) * (r + 0.49), y0 + 2.1, z + Math.sin(a) * (r + 0.49), 0, Math.PI / 2 - a, 0, 0.1, 3.35, 0.13));
+  }
   {
     const a = opts.door ?? ((x * 0.13 + z * 0.07) % (Math.PI * 2));
     b.add(new RoundedBoxGeometry(4.2, 0.3, 3.0, 2, 0.12), mats.white, M(x + Math.cos(a) * (r + 1.8), y0 + 3.3, z + Math.sin(a) * (r + 1.8), 0, Math.PI / 2 - a, 0));
@@ -154,6 +192,7 @@ function spire(b, ctx, x, y0, z, h, r, opts = {}) {
   for (const t of bands) {
     const rr = r * prof(t) + 0.12;
     b.add(new THREE.CylinderGeometry(rr * 0.98, rr, h * 0.035, 28, 1, true), mats.glass, M(x, y0 + h * t, z));
+    for (const sy of [-1, 1]) b.add(new THREE.CylinderGeometry(rr + 0.015, rr + 0.015, 0.1, 28, 1, true), mats.whiteMatte, M(x, y0 + h * t + sy * h * 0.0175, z));
   }
   if (opts.collide !== false) {
     const S = [0, 0.1, 0.2, 0.32, 0.45, 0.6, 0.75, 0.88];
@@ -166,10 +205,21 @@ function spire(b, ctx, x, y0, z, h, r, opts = {}) {
 }
 
 function pod(b, ctx, x, y, z, w, hgt, d, rot) {
+  const { mats } = ctx, F = localFrame(x, y, z, rot);
   b.add(new THREE.BoxGeometry(w + 1.2, 3.4, d + 1.2), ctx.mats.plaza, M(x, y - 1.55, z, 0, rot, 0));
   b.add(new RoundedBoxGeometry(w, hgt, d, 3, Math.min(1.6, hgt * 0.45)), ctx.mats.white, M(x, y + hgt / 2 + 0.15, z, 0, rot, 0));
   b.add(new THREE.BoxGeometry(w * 0.92, hgt * 0.42, d + 0.12), ctx.mats.glassDark, M(x, y + hgt * 0.45 + 0.1, z, 0, rot, 0));
-  b.add(new THREE.BoxGeometry(w * 0.7, 0.12, d * 0.6), new THREE.MeshLambertMaterial({ color: '#7cc24c' }), M(x, y + hgt + 0.18, z, 0, rot, 0));
+  b.add(new THREE.BoxGeometry(w * 0.7, 0.12, d * 0.6), mats.roofGarden, M(x, y + hgt + 0.18, z, 0, rot, 0));
+  for (const sz of [-1, 1]) {
+    const ww = w * 0.92, hh = hgt * 0.42, yy = hgt * 0.45 + 0.1, zz = sz * (d / 2 + 0.08);
+    for (const sy of [-1, 1]) b.add(detailBox, mats.whiteMatte, F(0, yy + sy * (hh / 2 + 0.045), zz, ww + 0.1, 0.09, 0.13));
+    const n = Math.min(6, Math.ceil(w / 2));
+    for (let k = 0; k <= n; k++) b.add(detailBox, mats.white, F(-ww / 2 + k * ww / n, yy, zz, 0.085, hh, 0.13));
+  }
+  // The decorative entrance trim stays within the existing plinth footprint.
+  b.add(detailBox, mats.glassDark, F(0, hgt * 0.3 + 0.15, d / 2 + 0.09, 1.7, hgt * 0.56, 0.06));
+  for (const sx of [-1, 1]) b.add(detailBox, mats.whiteMatte, F(sx * 0.9, hgt * 0.3 + 0.15, d / 2 + 0.13, 0.1, hgt * 0.56, 0.15));
+  b.add(detailBox, mats.gold, F(0.55, hgt * 0.3, d / 2 + 0.22, 0.055, 0.42, 0.06));
   if (ctx.foliage) for (let k = -1; k <= 1; k++) ctx.foliage.add(x + Math.cos(rot) * k * w * 0.25, y + hgt + 0.55, z - Math.sin(rot) * k * w * 0.25, 0.8, 0.6, 0.8, GREENS[(k + 4) % 5], k);
   const ca = Math.cos(rot), sa = Math.sin(rot);
   const hx = (w / 2 - d / 2);

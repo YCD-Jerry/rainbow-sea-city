@@ -162,11 +162,11 @@ function loft(rings, seg = 24, { th0 = -Math.PI, th1 = Math.PI, wave = 0, waveN 
   return g;
 }
 // tapered limb along -y: profile [[t(0..1), r], ...]
-function limb(len, prof, seg = 14, flat = 1) {
+function limb(len, prof, seg = 12, flat = 1) {
   return loft(prof.map(([t, r]) => [-t * len, r, r * flat]).reverse(), seg);
 }
 // hair / ribbon strand along a curve; width tapers to the tip
-function strand(pts, w0, th, { hint = new THREE.Vector3(0, 0, 1), taper = 1.4, wEnd = 0.08, n = 12, rs = 6 } = {}) {
+function strand(pts, w0, th, { hint = new THREE.Vector3(0, 0, 1), taper = 1.4, wEnd = 0.08, n = 10, rs = 6 } = {}) {
   const curve = new THREE.CatmullRomCurve3(pts.map((p) => new THREE.Vector3(...p)));
   const pos = [], idx = [];
   const T = new THREE.Vector3(), B = new THREE.Vector3(), N = new THREE.Vector3(), P = new THREE.Vector3();
@@ -195,7 +195,58 @@ function strand(pts, w0, th, { hint = new THREE.Vector3(0, 0, 1), taper = 1.4, w
   g.setIndex(idx); g.computeVertexNormals();
   return g;
 }
-const ellip = (rx, ry, rz, w = 18, h = 14, opts = {}) => { const g = new THREE.SphereGeometry(1, w, h, opts.p0 ?? 0, opts.pl ?? Math.PI * 2, opts.t0 ?? 0, opts.tl ?? Math.PI); g.scale(rx, ry, rz); return g; };
+const ellip = (rx, ry, rz, w = 16, h = 10, opts = {}) => { const g = new THREE.SphereGeometry(1, w, h, opts.p0 ?? 0, opts.pl ?? Math.PI * 2, opts.t0 ?? 0, opts.tl ?? Math.PI); g.scale(rx, ry, rz); return g; };
+
+// A continuous cheek / jaw surface keeps the face smooth at portrait distance.
+// The front is a little flatter than the skull, so the painted eyes sit on a face rather than a ball.
+function faceGeometry(rings) {
+  const smooth = [];
+  const cubic = (a, b, c, d, t) => 0.5 * (2 * b + (c - a) * t + (2 * a - 5 * b + 4 * c - d) * t * t + (3 * b - a - 3 * c + d) * t * t * t);
+  for (let i = 0; i < rings.length - 1; i++) {
+    const a = rings[Math.max(0, i - 1)], b = rings[i], c = rings[i + 1], d = rings[Math.min(rings.length - 1, i + 2)];
+    for (let j = 0; j < 2; j++) {
+      const t = j / 2;
+      smooth.push([THREE.MathUtils.lerp(b[0], c[0], t), Math.max(0.002, cubic(a[1], b[1], c[1], d[1], t)), Math.max(0.002, cubic(a[2], b[2], c[2], d[2], t)), cubic(a[3] || 0, b[3] || 0, c[3] || 0, d[3] || 0, t)]);
+    }
+  }
+  smooth.push(rings[rings.length - 1]);
+  const geo = loft(smooth, 40), pos = geo.attributes.position;
+  for (let i = 0; i < smooth.length; i++) {
+    const [y, , rz, cz = 0] = smooth[i];
+    const cheek = THREE.MathUtils.smoothstep(y, -0.12, -0.04) * (1 - THREE.MathUtils.smoothstep(y, 0.035, 0.10));
+    for (let j = 0; j <= 40; j++) {
+      const th = -Math.PI + j / 40 * Math.PI * 2, front = Math.max(0, Math.cos(th));
+      pos.setZ(i * 41 + j, cz + rz * Math.cos(th) + rz * 0.1 * cheek * Math.sin(th) ** 2 * front);
+    }
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+
+// Cloth panels use a continuous curved sheet with a stitched hem, instead of a flat box edge.
+function clothPanel(len, w0, w1, curl = 0, pleat = 0.008) {
+  const pos = [], uv = [], idx = [], rows = 6, cols = 8;
+  for (let i = 0; i <= rows; i++) {
+    const t = i / rows, w = THREE.MathUtils.lerp(w0, w1, t * t * (3 - 2 * t));
+    for (let j = 0; j <= cols; j++) {
+      const u = j / cols, x = (u * 2 - 1) * w;
+      pos.push(x, -len * t + Math.sin(u * Math.PI) * 0.008 * t, curl * t * t + pleat * Math.cos((u - 0.5) * Math.PI * 2) * (0.3 + t * 0.7));
+      uv.push(u, 1 - t);
+    }
+  }
+  for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) {
+    const a = i * (cols + 1) + j, b = a + 1, c = a + cols + 1, d = c + 1;
+    idx.push(a, c, b, b, c, d);
+  }
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); geo.setIndex(idx); geo.computeVertexNormals();
+  return geo;
+}
+
+function clothHem(add, parent, w, len, curl, mat, pleat = 0.008) {
+  const pts = [];
+  for (let j = 0; j <= 8; j++) { const u = j / 8; pts.push(new THREE.Vector3((u * 2 - 1) * w, -len + Math.sin(u * Math.PI) * 0.008, curl + pleat * Math.cos((u - 0.5) * Math.PI * 2))); }
+  add(parent, new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 8, 0.005, 4, false), mat, [0, 0.009, 0], [0, 0, 0], null, { outline: 0 });
+}
 
 // ---------- face texture ----------
 function faceTexture(F, closed = false) {
@@ -297,7 +348,7 @@ export const LOOKS = {
     hair: '#2c3463', hairShade: '#161a3c', hairStyle: 'bob', hairAcc: '#7fe0ff',
     face: { iris0: '#0e3a5c', iris1: '#2f9fd6', iris2: '#b8f0ff', pupil: '#06182a', lash: '#16182a', brow: '#2a3260' },
     pal: { top: ['#f4fbff', '#c4d8e8'], coat: ['#2b3a5e', '#141c32'], trim: ['#6fd6ff', '#2f8fb8'], dark: ['#1c2236', '#0d111c'], scarf: ['#6fd6ff', '#2f8fb8'], leg: ['#f4fbff', '#c4d8e8'], boot: ['#2b3a5e', '#141c32'], accent: ['#8fe8ff', '#3fb0d8'] },
-    outfit: 'yao', weapon: { kind: 'bow', blade: '#e6f8ff', glow: '#5fd0ff', metal: '#6fd6ff', grip: '#1c2236', gem: '#8fe8ff' },
+    outfit: 'silk', weapon: { kind: 'bow', blade: '#e6f8ff', glow: '#5fd0ff', metal: '#6fd6ff', grip: '#1c2236', gem: '#8fe8ff' },
   },
   // 翎：青碧长发的御风者，白绿长袍
   feather: {
@@ -305,7 +356,7 @@ export const LOOKS = {
     hair: '#7fe6c8', hairShade: '#3a9c85', hairStyle: 'long', hairAcc: '#f6ffd0',
     face: { iris0: '#0f4a40', iris1: '#2fb890', iris2: '#c8ffec', pupil: '#062a22', lash: '#1c2a26', brow: '#4a9c88' },
     pal: { top: ['#f6fff9', '#c8e4d6'], coat: ['#4fc7a8', '#2a7f6a'], trim: ['#f0d27a', '#b08a2c'], dark: ['#2d4a44', '#16282a'], scarf: ['#bdf5e0', '#5fc8a6'], leg: ['#f6fff9', '#c8e4d6'], boot: ['#34584f', '#1b302b'], accent: ['#9ff5df', '#3fb89a'] },
-    outfit: 'ai', weapon: { kind: 'sword', blade: '#e8fff6', glow: '#7fe6c8', metal: '#f0d27a', grip: '#2d4a44', gem: '#7fe6c8' },
+    outfit: 'feather', weapon: { kind: 'sword', blade: '#e8fff6', glow: '#7fe6c8', metal: '#f0d27a', grip: '#2d4a44', gem: '#7fe6c8' },
   },
   // 岚：深青短发的少年剑客
   gale: {
@@ -313,7 +364,7 @@ export const LOOKS = {
     hair: '#2f6f74', hairShade: '#173a40', hairStyle: 'male', hairAcc: '#8fe9d4',
     face: { iris0: '#0f4a4a', iris1: '#2ab08e', iris2: '#c0ffe9', pupil: '#062222', lash: '#1e2a2e', brow: '#2a5a5e', male: true },
     pal: { top: ['#f6fbfb', '#b8cccc'], coat: ['#3f9c8a', '#215a50'], trim: ['#f3dd9a', '#b8963c'], dark: ['#2a3338', '#14191c'], scarf: ['#e8fff4', '#8cc9b4'], leg: ['#2a3338', '#14191c'], boot: ['#3a4a48', '#1d2827'], accent: ['#8fe9d4', '#3fb89a'] },
-    outfit: 'lan', weapon: { kind: 'sword', blade: '#e2fff4', glow: '#8fe9d4', metal: '#f3dd9a', grip: '#2a3338', gem: '#8fe9d4' },
+    outfit: 'gale', weapon: { kind: 'sword', blade: '#e2fff4', glow: '#8fe9d4', metal: '#f3dd9a', grip: '#2a3338', gem: '#8fe9d4' },
   },
 };
 
@@ -336,7 +387,7 @@ export function makeCharacter(look) {
   mats.hair = toon(L.hair, L.hairShade, { hair: true, rim: 0.3 }); mats.hair.userData.outline = new THREE.Color(L.hairShade).multiplyScalar(0.18).getHexString();
   mats.hairD = toon(L.hair, L.hairShade, { hair: true, rim: 0.3, side: THREE.DoubleSide }); mats.hairD.userData.outline = mats.hair.userData.outline;
   const D = (name) => { const k = name + 'D'; if (!mats[k]) { const [c, s] = L.pal[name]; mats[k] = toon(c, s, { side: THREE.DoubleSide }); mats[k].userData.outline = new THREE.Color(s).multiplyScalar(0.16).getHexString(); } return mats[k]; };
-  const add = (parent, geo, mat, p = [0, 0, 0], r = [0, 0, 0], s = null, { outline = 1, cast = true } = {}) => {
+  const add = (parent, geo, mat, p = [0, 0, 0], r = [0, 0, 0], s = null, { outline = 0.8, cast = true } = {}) => {
     const m = new THREE.Mesh(geo, mat); m.position.set(...p); m.rotation.set(...r); if (s) m.scale.set(...s);
     m.castShadow = cast; parent.add(m);
     m.userData.ow = outline && mat.userData.outline ? outline : 0;
@@ -354,7 +405,7 @@ export function makeCharacter(look) {
     ? [[-0.04, 0.11, 0.082], [0.05, 0.112, 0.08], [0.14, 0.125, 0.088, 0.004], [0.22, 0.14, 0.095, 0.01], [0.3, 0.15, 0.092, 0.006], [0.36, 0.165, 0.08, -0.004], [0.4, 0.12, 0.066, -0.006], [0.43, 0.055, 0.048, -0.004], [0.445, 0.01, 0.01]]
     : [[-0.04, 0.105, 0.08], [0.04, 0.097, 0.074], [0.12, 0.103, 0.078, 0.004], [0.19, 0.117, 0.088, 0.014], [0.25, 0.123, 0.095, 0.02], [0.31, 0.123, 0.084, 0.008], [0.36, 0.138, 0.074, -0.004], [0.4, 0.104, 0.062, -0.008], [0.43, 0.05, 0.045, -0.005], [0.445, 0.01, 0.01]];
   add(torso, loft(torsoRings, 24), M('top'));
-  add(torso, new THREE.CylinderGeometry(male ? 0.042 : 0.036, male ? 0.046 : 0.04, 0.12, 12), mats.skin, [0, 0.47, -0.004]);
+  add(torso, loft([[0.41, male ? 0.052 : 0.046, 0.041, -0.006], [0.445, male ? 0.044 : 0.039, 0.036, -0.004], [0.49, male ? 0.039 : 0.035, 0.034, -0.002], [0.535, male ? 0.043 : 0.039, 0.037, 0]], 16), mats.skin);
 
   // ---- head ----
   const head = new THREE.Group(); head.position.y = 0.6; head.scale.setScalar(male ? 1.04 : 1.08); torso.add(head);
@@ -363,8 +414,13 @@ export function makeCharacter(look) {
   const headRings = (male
     ? [[-0.138, 0.015, 0.015, 0.03], [-0.125, 0.032, 0.03, 0.028], [-0.1, 0.066, 0.066, 0.01], [-0.07, 0.086, 0.086, 0], [-0.035, 0.098, 0.094, -0.004], [0, 0.103, 0.1, -0.008], [0.04, 0.106, 0.106, -0.012], [0.08, 0.102, 0.104, -0.016], [0.11, 0.087, 0.09, -0.02], [0.135, 0.056, 0.06, -0.022], [0.15, 0.02, 0.025, -0.022], [0.155, 0.002, 0.002, -0.022]]
     : [[-0.135, 0.01, 0.01, 0.034], [-0.125, 0.024, 0.024, 0.03], [-0.1, 0.056, 0.06, 0.012], [-0.07, 0.079, 0.08, 0], [-0.035, 0.094, 0.092, -0.004], [0, 0.1, 0.1, -0.008], [0.04, 0.104, 0.106, -0.012], [0.08, 0.1, 0.104, -0.016], [0.11, 0.085, 0.09, -0.02], [0.135, 0.055, 0.06, -0.022], [0.15, 0.02, 0.025, -0.022], [0.155, 0.002, 0.002, -0.022]]);
-  const headMesh = add(head, loft(headRings, 40), faceMat); headMesh.userData.keep = true;
-  for (const s of [-1, 1]) add(head, ellip(0.018, 0.03, 0.012), mats.skin, [s * 0.098, -0.01, -0.012], [0, s * 0.3, 0], null, { outline: 1 });
+  const headMesh = add(head, faceGeometry(headRings), faceMat); headMesh.userData.keep = true;
+  // A small nose tip catches light in profile without interrupting the painted face.
+  add(head, ellip(0.008, 0.009, 0.01, 10, 8), mats.skin, [0, -0.047, 0.091], [0, 0, 0], null, { outline: 0 });
+  for (const s of [-1, 1]) {
+    add(head, ellip(0.018, 0.029, 0.015, 14, 10), mats.skin, [s * 0.098, -0.014, -0.009], [0, s * 0.3, 0], null, { outline: 0.6 });
+    add(head, ellip(0.008, 0.016, 0.006, 10, 8), toonAcc(L.skinShade, 0), [s * 0.106, -0.014, 0.003], [0, s * 0.3, 0], null, { outline: 0 });
+  }
   buildHair(L, head, add, mats, sway);
 
   // ---- arms ----
@@ -375,11 +431,15 @@ export function makeCharacter(look) {
     const el = new THREE.Group(); el.position.y = -0.27; sh.add(el);
     add(el, ellip(male ? 0.04 : 0.035, 0.035, 0.035), M('top'));
     add(el, limb(0.24, [[0, male ? 0.04 : 0.034], [0.35, male ? 0.041 : 0.035], [1, male ? 0.03 : 0.025]]), mats.skin, [0, 0, 0]);
-    // hand: palm + finger block + thumb
+    // Palm, four tapered fingers and an opposed thumb read as a hand in portraits and close views.
     const hand = new THREE.Group(); hand.position.y = -0.255; el.add(hand);
-    add(hand, ellip(male ? 0.032 : 0.028, 0.042, 0.017), mats.skin, [0, -0.02, 0]);
-    add(hand, ellip(male ? 0.03 : 0.026, 0.035, 0.015), mats.skin, [0, -0.06, 0.004], [0.25, 0, 0]);
-    add(hand, ellip(0.011, 0.026, 0.011), mats.skin, [side * -0.02, -0.03, 0.016], [0.3, 0, side * 0.5]);
+    add(hand, ellip(male ? 0.031 : 0.027, 0.034, 0.015, 14, 10), mats.skin, [0, -0.019, 0], [0, 0, 0], null, { outline: 0.5 });
+    const fingerScale = male ? 1.07 : 1;
+    for (let i = 0; i < 4; i++) {
+      const x = (i - 1.5) * 0.013 * fingerScale, len = [0.039, 0.049, 0.046, 0.034][i] * fingerScale;
+      add(hand, strand([[x, -0.039, 0.001], [x + side * 0.001, -0.047 - len * 0.4, 0.005], [x + side * 0.002, -0.039 - len, 0.012]], 0.006 * fingerScale, 0.006, { hint: new THREE.Vector3(0, 0, 1), n: 4, rs: 6, wEnd: 0.45 }), mats.skin, [0, 0, 0], [0, 0, 0], null, { outline: 0.5 });
+    }
+    add(hand, strand([[side * -0.023, -0.005, 0.005], [side * -0.037, -0.019, 0.012], [side * -0.033, -0.044, 0.02]], 0.009, 0.008, { hint: new THREE.Vector3(0, 0, 1), n: 5, rs: 6, wEnd: 0.4 }), mats.skin, [0, 0, 0], [0, 0, 0], null, { outline: 0.5 });
     const hip = new THREE.Group(); hip.position.set(side * (male ? 0.09 : 0.085), -0.04, 0); pose.add(hip);
     const kn = new THREE.Group(); kn.position.y = -0.42; hip.add(kn);
     return { sh, el, hand, hip, kn, side };
@@ -452,8 +512,12 @@ function buildHair(L, head, add, mats, sway) {
   add(head, ellip(0.113, 0.15, 0.12, 24, 18, { p0: Math.PI, pl: Math.PI, t0: Math.PI * 0.12, tl: Math.PI * 0.7 }), HD, [0, 0.0, -0.016]);
   const S = (pts, w, th = 0.013, o = {}) => add(head, strand(pts, w, th, { hint: o.hint || outward(pts[Math.floor(pts.length / 2)]), ...o }), H);
   // bangs over the forehead, ending above the eyes
-  const bangs = style === 'bob'
-    ? [-0.62, -0.38, -0.13, 0.13, 0.38, 0.62].map((f) => [f, 0.035, 1])
+  const bangs = L.outfit === 'silk'
+    ? [[-0.68, -0.008, 0.85], [-0.43, 0.024, 1.0], [-0.2, 0.064, 0.9], [0.07, 0.080, 0.9], [0.34, 0.048, 1.0], [0.63, 0.012, 1.0]]
+    : L.outfit === 'gale'
+      ? [[-0.66, -0.005, 1.0], [-0.40, 0.018, 1.1], [-0.13, 0.047, 1.1], [0.16, 0.078, 1.0], [0.42, 0.065, 1.0], [0.66, 0.027, 0.9]]
+    : style === 'bob'
+      ? [-0.62, -0.38, -0.13, 0.13, 0.38, 0.62].map((f) => [f, 0.035, 1])
     : style === 'male'
       ? [[-0.68, 0.0], [-0.42, 0.03], [-0.16, 0.0], [0.1, 0.035], [0.36, 0.01], [0.62, 0.03]].map(([f, y]) => [f, y, 1.05])
       : [[-0.7, -0.03], [-0.44, 0.03], [-0.17, 0.045], [0.1, 0.03], [0.36, 0.045], [0.64, -0.02]].map(([f, y]) => [f, y, 1]);
@@ -471,7 +535,7 @@ function buildHair(L, head, add, mats, sway) {
   const ring = (n, from, to, yLow, w, flare = 1.12) => {
     for (let i = 0; i < n; i++) {
       const phi = from + (to - from) * (i / (n - 1));
-      const p2 = capPt(phi, 0.0, 1.08), lowY = yLow + (i % 2) * 0.015;
+      const p2 = capPt(phi, 0.0, 1.08), lowY = yLow + Math.sin(i * 2.3) * 0.018;
       S([capPt(phi, 1.15, 1.0), capPt(phi, 0.6, 1.04), p2, [p2[0] * flare, lowY, p2[2] * flare + (p2[2] < 0 ? -0.004 : 0)]], w, 0.014, { wEnd: 0.25 });
     }
   };
@@ -491,7 +555,7 @@ function buildHair(L, head, add, mats, sway) {
     add(head, ellip(0.012, 0.012, 0.012), toonAcc(L.hairAcc), [bx, -0.17, 0.035]);
     S([capPt(0, 1.45, 1.0), [0.02, 0.2, -0.02], [0.045, 0.205, 0.0]], 0.018, 0.01, { hint: new THREE.Vector3(1, 0, 0) });
   } else if (style === 'bob') {
-    ring(13, Math.PI * 0.42, Math.PI * 1.58, -0.12, 0.034, 1.1);
+    ring(11, Math.PI * 0.42, Math.PI * 1.58, L.outfit === 'silk' ? -0.155 : -0.12, 0.037, L.outfit === 'silk' ? 1.17 : 1.1);
     const cm = toonAcc(L.hairAcc, 0.5);
     for (const [y, rz] of [[0.07, 0.4], [0.035, 0.7]]) add(head, new THREE.OctahedronGeometry(0.018, 0), cm, [0.112, y, 0.03], [0, 0, rz], [1, 1.8, 1]);
   } else if (style === 'long') {
@@ -499,7 +563,8 @@ function buildHair(L, head, add, mats, sway) {
     const back = new THREE.Group(); back.position.set(0, 0.06, -0.1); head.add(back); head.userData.pony = back;
     for (let i = 0; i < 11; i++) {
       const x = (i - 5) * 0.02;
-      add(back, strand([[x * 0.8, 0.02, 0], [x * 1.2, -0.08, -0.04], [x * 1.45, -0.28, -0.06], [x * 1.5, -0.56, -0.07], [x * 1.45, -0.8, -0.05]], 0.032, 0.014, { hint: new THREE.Vector3(0, 0, -1), wEnd: 0.25 }), H);
+      const tip = -0.80 + Math.abs(i - 5) * 0.025;
+      add(back, strand([[x * 0.8, 0.02, 0], [x * 1.2, -0.08, -0.04], [x * 1.45, -0.28, -0.06], [x * 1.5, -0.56, -0.07], [x * 1.45, tip, -0.05]], 0.032, 0.014, { hint: new THREE.Vector3(0, 0, -1), wEnd: 0.15 }), H);
     }
     const rib = toonAcc(L.pal.accent[0]);
     add(back, new THREE.TorusGeometry(0.03, 0.01, 6, 16), rib, [0, -0.45, -0.075], [0.1, 0, 0]);
@@ -526,30 +591,33 @@ function skirt(R, parent, { y = 0.04, len = 0.2, r0 = 0.13, r1 = 0.22, n = 10, m
     const g = new THREE.Group(); g.position.set(Math.sin(a) * r0, y, Math.cos(a) * r0 * rz); g.rotation.y = a; parent.add(g);
     const inner = new THREE.Group(); g.add(inner);
     const w0 = r0 * span * 0.62, w1 = r1 * span * 0.62;
-    const geo = loft([[-len, w1, 0.012, 0.0], [-len * 0.5, (w0 + w1) / 2, 0.012], [0, w0, 0.012]], 4, { th0: -Math.PI / 2, th1: Math.PI / 2 });
-    const pan = R.add(inner, geo, mat, [0, 0, 0], [0, 0, 0], null);
-    // make the panel a gently curved plate facing outward
-    pan.scale.set(1, 1, 0.6);
-    if (trim) R.add(inner, new THREE.BoxGeometry(w1 * 2, 0.022, 0.016), trim, [0, -len + 0.012, 0.004], [0, 0, 0], null, { outline: 0 });
+    R.add(inner, clothPanel(len, w0, w1), mat, [0, 0, 0], [0, 0, 0], null, { outline: 0.7 });
+    if (trim) clothHem(R.add, inner, w1, len, 0, trim);
     R.sway.push({ type: 'skirt', g: inner, a, base: flare });
     inner.rotation.x = -flare;
   }
 }
 function coatTail(R, group, { len = 0.55, w0 = 0.07, w1 = 0.11, mat, trim, curl = 0.12 }) {
-  const g = loft([[-len, w1, 0.012, curl * 0.6], [-len * 0.6, (w0 + w1) / 2, 0.012, curl * 0.3], [-len * 0.25, w0 * 1.05, 0.012, curl * 0.08], [0, w0, 0.012]], 6, { th0: -Math.PI / 2, th1: Math.PI / 2 });
-  const m = R.add(group, g, mat, [0, 0, 0], [0, Math.PI, 0], [1, 1, 0.5]);
-  if (trim) R.add(group, new THREE.BoxGeometry(w1 * 2, 0.025, 0.02), trim, [0, -len + 0.012, -curl * 0.6], [0, 0, 0], null, { outline: 0 });
+  const panel = new THREE.Group(); panel.rotation.y = Math.PI; group.add(panel);
+  const m = R.add(panel, clothPanel(len, w0, w1, curl * 0.6, 0.01), mat, [0, 0, 0], [0, 0, 0], null, { outline: 0.7 });
+  if (trim) clothHem(R.add, panel, w1, len, curl * 0.6, trim, 0.01);
   return m;
 }
 function belt(R, parent, y, rx, rz, mat, h = 0.035) {
   return R.add(parent, loft([[y - h / 2, rx, rz], [y + h / 2, rx, rz]], 28), mat);
 }
 function boot(R, A, { mat, trim, top = 0.18, rTop = 0.052, toe = true }) {
-  // shaft over the shin + foot
-  R.add(A.kn, loft([[-0.445, 0.04, 0.046], [-0.38, 0.034, 0.038], [-0.2, 0.046, 0.05], [-top, rTop, rTop]].reverse().map((r) => r).sort((a, b) => a[0] - b[0]), 16), mat);
+  // Shaped ankle, continuous vamp and a separate sole replace the oval "slipper" silhouette.
+  R.add(A.kn, loft([[-0.418, 0.038, 0.044], [-0.36, 0.034, 0.039], [-0.25, 0.041, 0.044], [-top, rTop, rTop]].sort((a, b) => a[0] - b[0]), 18), mat);
   if (trim) R.add(A.kn, loft([[-top - 0.012, rTop + 0.006, rTop + 0.006], [-top + 0.012, rTop + 0.006, rTop + 0.006]], 16), trim);
-  const foot = R.add(A.kn, ellip(0.045, 0.034, 0.1), mat, [0, -0.42, 0.045]);
-  R.add(A.kn, new THREE.BoxGeometry(0.075, 0.03, 0.06), R.M('dark'), [0, -0.432, -0.03], [0, 0, 0], null, { outline: 0 });
+  const foot = R.add(A.kn, loft([[-0.443, 0.044, 0.097, 0.038], [-0.433, 0.046, 0.10, 0.04], [-0.416, 0.043, 0.095, 0.037], [-0.398, 0.033, 0.067, 0.022], [-0.386, 0.024, 0.036, 0.006]], 20), mat);
+  R.add(A.kn, loft([[-0.452, 0.043, 0.096, 0.039], [-0.45, 0.047, 0.102, 0.04], [-0.438, 0.047, 0.102, 0.04]], 20), R.M('dark'), [0, 0, 0], [0, 0, 0], null, { outline: 0 });
+  if (trim) {
+    const seam = new THREE.EllipseCurve(0, 0, 0.044, 0.096, Math.PI * 0.35, Math.PI * 1.65, false, 0).getPoints(12).map((p) => new THREE.Vector3(p.x, -0.429, p.y + 0.038));
+    R.add(A.kn, new THREE.TubeGeometry(new THREE.CatmullRomCurve3(seam), 12, 0.003, 4, false), trim, [0, 0, 0], [0, 0, 0], null, { outline: 0 });
+    // Twin clasps provide readable construction detail while staying merged into the boot material bucket.
+    for (const y of [-top - 0.025, -top - 0.065]) R.add(A.kn, new THREE.BoxGeometry(0.023, 0.012, 0.012), trim, [A.side * (rTop - 0.003), y, 0.018], [0, 0, 0], null, { outline: 0 });
+  }
   return foot;
 }
 function sleeve(R, A, { mat, cuffMat, puff = 0.06, len = 0.2 }) {
@@ -696,6 +764,82 @@ const OUTFITS = {
     skirt(R, pose, { y: 0.07, len: 0.72, r0: 0.12, r1: 0.3, n: 14, mat: D('top'), trim: M('coat'), flare: 0.05 });
     skirt(R, pose, { y: 0.075, len: 0.42, r0: 0.128, r1: 0.26, n: 10, mat: D('coat'), trim: M('trim'), from: Math.PI * 0.4, to: Math.PI * 1.6, flare: 0.1 });
     for (const A of [R.L, R.R]) boot(R, A, { mat: M('boot'), trim: M('trim'), top: 0.32, rTop: 0.042 });
+  },
+  // 绫: fitted navy archer jacket, split water-blue ribbons and a practical side quiver.
+  silk(R) {
+    const { torso, pose, M, D, add } = R;
+    add(torso, loft([[0.06, 0.106, 0.084], [0.15, 0.114, 0.09, 0.006], [0.25, 0.132, 0.102, 0.014], [0.34, 0.142, 0.086], [0.40, 0.104, 0.065]], 24, { th0: 0.4, th1: Math.PI * 2 - 0.4 }), D('coat'));
+    add(torso, loft([[0.42, 0.055, 0.049], [0.48, 0.046, 0.044]], 18), M('coat'));
+    belt(R, torso, 0.035, 0.107, 0.086, M('dark'), 0.065);
+    add(torso, new THREE.TorusGeometry(0.022, 0.005, 6, 16), M('trim'), [0, 0.04, 0.092]);
+    for (const s of [-1, 1]) {
+      add(torso, strand([[s * 0.062, 0.40, 0.071], [s * 0.07, 0.32, 0.096], [s * 0.046, 0.15, 0.103]], 0.007, 0.004, { n: 6, rs: 4, wEnd: 1 }), M('trim'), [0, 0, 0], [0, 0, 0], null, { outline: 0 });
+    }
+    add(pose, loft([[-0.14, 0.09, 0.07], [-0.05, 0.13, 0.09], [0.06, 0.112, 0.084]], 22), M('dark'));
+    skirt(R, pose, { y: 0.055, len: 0.18, r0: 0.124, r1: 0.185, n: 6, mat: D('coat'), trim: M('trim'), from: Math.PI * 0.35, to: Math.PI * 1.65, flare: 0.14 });
+    for (const A of [R.L, R.R]) {
+      sleeve(R, A, { mat: M('coat'), cuffMat: M('trim'), puff: 0.045, len: A.side > 0 ? 0.14 : 0.20 });
+      glove(R, A, { mat: M('dark'), cuff: M('trim'), len: A.side > 0 ? 0.16 : 0.10 });
+      boot(R, A, { mat: M('boot'), trim: M('trim'), top: 0.16, rTop: 0.052 });
+    }
+    // Water ribbons retain the existing secondary-motion groups.
+    R.tail.position.set(0.066, 0.38, -0.068); R.tail2.position.set(-0.04, 0.38, -0.08);
+    coatTail(R, R.tail, { len: 0.66, w0: 0.022, w1: 0.039, mat: D('scarf'), trim: M('top'), curl: 0.11 });
+    coatTail(R, R.tail2, { len: 0.56, w0: 0.017, w1: 0.026, mat: D('scarf'), trim: M('trim'), curl: 0.08 });
+    const q = new THREE.Group(); q.position.set(-0.12, 0.08, -0.102); q.rotation.z = -0.14; torso.add(q);
+    add(q, new THREE.CylinderGeometry(0.032, 0.025, 0.28, 10), M('dark'));
+    add(q, new THREE.TorusGeometry(0.034, 0.004, 4, 12), M('trim'), [0, 0.14, 0], [Math.PI / 2, 0, 0]);
+    for (const x of [-0.012, 0.012]) {
+      add(q, new THREE.CylinderGeometry(0.003, 0.003, 0.15, 4), M('trim'), [x, 0.18, 0]);
+      add(q, ellip(0.007, 0.025, 0.012, 8, 6), M('top'), [x, 0.23, 0]);
+    }
+  },
+  // 翎: a white robe with a leaf-shaped green mantle, open front and three floating coat panels.
+  feather(R) {
+    const { torso, pose, M, D, add } = R;
+    add(torso, loft([[0.02, 0.109, 0.084], [0.15, 0.109, 0.084, 0.004], [0.27, 0.128, 0.098, 0.014], [0.35, 0.14, 0.083], [0.41, 0.09, 0.061]], 24), M('top'));
+    add(torso, loft([[0.24, 0.17, 0.127], [0.32, 0.163, 0.109], [0.39, 0.12, 0.079], [0.44, 0.06, 0.055]], 24, { th0: Math.PI * 0.32, th1: Math.PI * 1.68 }), D('coat'));
+    belt(R, torso, 0.075, 0.111, 0.086, M('coat'), 0.065);
+    add(torso, new THREE.OctahedronGeometry(0.026, 0), M('trim'), [0, 0.085, 0.095], [0, 0, 0], [0.75, 1.4, 0.4]);
+    const clasp = new THREE.Group(); clasp.position.set(0.04, 0.36, 0.09); torso.add(clasp);
+    for (const s of [-1, 1]) add(clasp, ellip(0.01, 0.036, 0.007, 10, 8), M('trim'), [s * 0.012, 0, 0], [0, 0, s * -0.5]);
+    add(pose, loft([[-0.12, 0.09, 0.07], [-0.05, 0.13, 0.09], [0.06, 0.112, 0.084]], 22), M('top'));
+    skirt(R, pose, { y: 0.065, len: 0.37, r0: 0.121, r1: 0.24, n: 10, mat: D('top'), trim: M('coat'), flare: 0.1 });
+    skirt(R, pose, { y: 0.07, len: 0.66, r0: 0.13, r1: 0.29, n: 7, mat: D('coat'), trim: M('trim'), from: Math.PI * 0.32, to: Math.PI * 1.68, flare: 0.06 });
+    for (const A of [R.L, R.R]) {
+      sleeve(R, A, { mat: M('top'), cuffMat: M('coat'), puff: 0.047, len: 0.15 });
+      add(A.el, limb(0.12, [[0, 0.033], [0.6, 0.044], [1, 0.061]], 14), D('top'), [0, -0.04, 0]);
+      add(A.el, loft([[-0.17, 0.06, 0.059], [-0.155, 0.06, 0.059]], 16), M('trim'));
+      boot(R, A, { mat: M('boot'), trim: M('trim'), top: 0.23, rTop: 0.047 });
+    }
+    R.tail.position.set(0.045, 0.075, -0.085); R.tail2.position.set(-0.045, 0.075, -0.085);
+    coatTail(R, R.tail, { len: 0.58, w0: 0.022, w1: 0.045, mat: D('scarf'), trim: M('trim'), curl: 0.14 });
+    coatTail(R, R.tail2, { len: 0.68, w0: 0.022, w1: 0.045, mat: D('scarf'), trim: M('trim'), curl: 0.14 });
+  },
+  // 岚: a short field jacket, diagonal scarf, fitted trousers and a single shoulder guard.
+  gale(R) {
+    const { torso, pose, M, D, add } = R;
+    // Keep the jacket shell clear of the shirt at the chest and shoulder transitions.
+    add(torso, loft([[0.035, 0.12, 0.091], [0.17, 0.139, 0.111], [0.28, 0.158, 0.112], [0.36, 0.171, 0.093], [0.42, 0.117, 0.078]], 26, { th0: 0.36, th1: Math.PI * 2 - 0.36 }), D('coat'));
+    add(torso, loft([[0.40, 0.067, 0.06], [0.47, 0.05, 0.047]], 18), M('coat'));
+    belt(R, torso, 0.025, 0.119, 0.091, M('dark'), 0.06);
+    add(torso, new THREE.BoxGeometry(0.032, 0.026, 0.012), M('trim'), [0, 0.025, 0.098], [0, 0, 0], null, { outline: 0 });
+    add(torso, strand([[0.092, 0.40, 0.073], [0.02, 0.36, 0.099], [-0.13, 0.31, 0.074]], 0.029, 0.01, { n: 8, rs: 6, wEnd: 0.8 }), M('scarf'));
+    const sc = new THREE.Group(); sc.position.set(-0.10, 0.36, -0.055); torso.add(sc);
+    add(sc, strand([[0, 0, 0], [-0.035, -0.04, -0.06], [-0.055, -0.19, -0.10], [-0.045, -0.31, -0.085]], 0.032, 0.006, { hint: new THREE.Vector3(0, 0, -1), n: 8, wEnd: 0.6 }), D('scarf'));
+    R.sway.push({ type: 'wave', g: sc, base: 0, k: 0.4, f: 8, ph: 0.4, amp: 0.08 });
+    add(pose, loft([[-0.15, 0.09, 0.075], [-0.06, 0.136, 0.094], [0.06, 0.122, 0.088]], 22), M('dark'));
+    for (const A of [R.L, R.R]) {
+      sleeve(R, A, { mat: M('coat'), cuffMat: M('trim'), puff: 0.052, len: 0.18 });
+      glove(R, A, { mat: M('dark'), cuff: M('trim'), len: 0.13 });
+      add(A.hip, limb(0.43, [[0, 0.083], [0.5, 0.069], [0.85, 0.057], [1, 0.052]], 16), M('dark'), [0, 0.012, 0]);
+      boot(R, A, { mat: M('boot'), trim: M('trim'), top: 0.19, rTop: 0.052 });
+    }
+    add(R.L.sh, ellip(0.062, 0.024, 0.061, 16, 10), M('dark'), [0.005, 0.025, 0], [0, 0, -0.2]);
+    add(R.L.sh, ellip(0.055, 0.016, 0.055, 16, 8), M('trim'), [0.007, 0.042, 0], [0, 0, -0.2]);
+    R.tail.position.set(0.08, 0.045, -0.073); R.tail2.position.set(-0.08, 0.045, -0.073);
+    coatTail(R, R.tail, { len: 0.31, w0: 0.047, w1: 0.068, mat: D('coat'), trim: M('trim'), curl: 0.065 });
+    coatTail(R, R.tail2, { len: 0.31, w0: 0.047, w1: 0.068, mat: D('coat'), trim: M('trim'), curl: 0.065 });
   },
 };
 
