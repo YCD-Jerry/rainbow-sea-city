@@ -46,6 +46,8 @@ export const ITEMS = {
   core: { name: '潮蚀岩芯', tab: 'dev', rarity: 4, icon: 'core', color: '#6fe7ff', desc: '礁岩守卫胸口的发光岩芯，被海水打磨了很多年。', use: '高级突破材料。' },
   // food
   berry: { name: '虹莓', tab: 'food', rarity: 1, icon: 'berry', color: '#ff5f7e', heal: { flat: 300 }, desc: '海崖灌木上的小莓果，酸里带甜。', effect: '恢复 300 点生命值。' },
+  apple: { name: '苹果', tab: 'food', rarity: 1, icon: 'apple', color: '#ea5a59', heal: { flat: 300 }, desc: '从树上摘下的红苹果，果皮透着日光，咬起来清脆多汁。', effect: '恢复 300 点生命值。' },
+  orange: { name: '橘子', tab: 'food', rarity: 1, icon: 'orange', color: '#ffae45', heal: { flat: 300 }, desc: '海风里成熟的橘子，剥开薄皮，果肉带着清甜的香气。', effect: '恢复 300 点生命值。' },
   riceball: { name: '海盐饭团', tab: 'food', rarity: 2, icon: 'riceball', color: '#ffffff', heal: { pct: 0.2, flat: 400 }, desc: '用海盐捏紧的饭团，适合赶路时吃。', effect: '恢复 20% 生命值上限，并额外恢复 400 点生命值。' },
   skewer: { name: '炭烤鱼串', tab: 'food', rarity: 2, icon: 'skewer', color: '#ffb35a', buff: { atk: 0.15, dur: 300 }, desc: '外皮微焦的鱼串，吃完浑身是劲。', effect: '300 秒内攻击力提高 15%。' },
   soup: { name: '珊瑚鲜汤', tab: 'food', rarity: 3, icon: 'soup', color: '#ff9f80', heal: { pct: 0.35, flat: 500 }, regen: { pct: 0.03, dur: 10 }, desc: '慢火熬出的鲜汤，喝一口就暖和起来。', effect: '恢复 35% 生命值上限并额外恢复 500 点，之后 10 秒内每秒恢复 3%。' },
@@ -142,6 +144,19 @@ export function iconSVG(item, extra = '') {
       <path d="M30 12 C34 6 44 6 46 12 C40 12 36 14 32 18 Z" fill="#6fbf4a"/>
       <circle cx="24" cy="36" r="11" fill="url(#${id})"/><circle cx="40" cy="34" r="11" fill="url(#${id})"/><circle cx="32" cy="48" r="11" fill="url(#${id})"/>
       <circle cx="21" cy="32" r="3" fill="#fff" opacity=".7"/><circle cx="37" cy="30" r="3" fill="#fff" opacity=".7"/><circle cx="29" cy="44" r="3" fill="#fff" opacity=".7"/>`, grad('#ffb3c4', c));
+    case 'apple': return S(`
+      <path d="M32 20 Q28 13 32 7" fill="none" stroke="#795237" stroke-width="3.5" stroke-linecap="round"/>
+      <path d="M33 15 Q39 3 53 8 Q47 19 33 15 Z" fill="#74b754"/><path d="M35 14 L48 9" stroke="#c9eaa2" stroke-width="1.2"/>
+      <path d="M32 22 C17 12 7 25 10 40 C13 55 24 60 32 54 C40 60 52 54 55 39 C58 24 45 12 32 22 Z" fill="url(#${id})" stroke="#bd4148" stroke-width="1.5"/>
+      <path d="M27 22 Q32 26 37 22" fill="none" stroke="#a93e42" stroke-width="2" stroke-linecap="round"/>
+      <path d="M19 29 Q14 34 18 41" fill="none" stroke="#fff2cf" stroke-width="3.5" opacity=".7" stroke-linecap="round"/>`, grad('#ff9272', c));
+    case 'orange': return S(`
+      <path d="M33 18 Q33 10 36 7" fill="none" stroke="#755739" stroke-width="3" stroke-linecap="round"/>
+      <path d="M35 12 Q45 4 55 11 Q47 22 35 12 Z" fill="#72ae4d"/>
+      <ellipse cx="32" cy="37" rx="23" ry="21" fill="url(#${id})" stroke="#db7e2e" stroke-width="1.5"/>
+      <path d="M26 17 L30 20 L34 16 L37 21 L40 19 L34 24 L28 22 Z" fill="#629a45"/>
+      <path d="M18 29 Q14 34 16 39" fill="none" stroke="#fff2b9" stroke-width="3" opacity=".65" stroke-linecap="round"/>
+      <g fill="#df8632" opacity=".65"><circle cx="26" cy="33" r="1"/><circle cx="38" cy="29" r=".9"/><circle cx="44" cy="40" r="1.1"/><circle cx="23" cy="46" r="1"/><circle cx="34" cy="49" r=".9"/></g>`, grad('#ffd777', c));
     case 'riceball': return S(`
       <path d="M32 8 C42 8 56 40 54 48 C52 56 12 56 10 48 C8 40 22 8 32 8 Z" fill="#fbfbf6" stroke="#d9d6c8" stroke-width="1.5"/>
       <rect x="20" y="38" width="24" height="18" rx="3" fill="#2d4a3a"/>

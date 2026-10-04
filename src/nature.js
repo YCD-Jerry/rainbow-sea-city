@@ -5,6 +5,7 @@ import { fbm, rng, ss } from './noise.js';
 import { H, H0, slope, coastX, FALL_Z, ISLANDS, streamCarve , reserved } from './terrain.js';
 import { Batch, Blobs } from './geo.js';
 import { makeFallMaterial } from './water.js';
+import { buildSpawnFruitTrees } from './trees.js';
 
 const LEAF_GREENS = ['#7fc23a', '#93cf45', '#6cb135', '#a5d957', '#5f9f30', '#88c84a'];
 
@@ -174,7 +175,8 @@ function grassClumpGeo() {
 export function buildNature(scene, ctx) {
   const { colliders, timeU, quality, foliage, mats, spawn } = ctx;
   const R = rng(1234);
-  const out = { animate: [] };
+  const out = { animate: [], fruitTrees: [] };
+  const refinedTrees = [];
 
   // ---------- Rocks ----------
   const rockGeos = [rockGeo(1), rockGeo(2), rockGeo(3)];
@@ -250,7 +252,7 @@ export function buildNature(scene, ctx) {
   const leafCards = [];
   const tmpQ = new THREE.Quaternion(), tmpE = new THREE.Euler();
 
-  const roots = (x, y, z, s, radius) => {
+  const roots = (x, y, z, s, radius, draw = true) => {
     const phase = detailR() * Math.PI * 2;
     const count = quality === 'high' ? 3 : 2;
     for (let i = 0; i < count; i++) {
@@ -259,7 +261,7 @@ export function buildNature(scene, ctx) {
       const p0 = new THREE.Vector3(x, y + 0.5 * s, z);
       const p1 = new THREE.Vector3(x + Math.cos(a) * r * 0.72, y + 0.14 * s, z + Math.sin(a) * r * 0.72);
       const p2 = new THREE.Vector3(x + Math.cos(a) * r, y + 0.025 * s, z + Math.sin(a) * r);
-      trunkBatch.add(woodGeo(new THREE.QuadraticBezierCurve3(p0, p1, p2), 0.09 * s, 0.018 * s,
+      if (draw) trunkBatch.add(woodGeo(new THREE.QuadraticBezierCurve3(p0, p1, p2), 0.09 * s, 0.018 * s,
         lowWood ? 2 : 3, lowWood ? 4 : 5), bark);
     }
   };
@@ -300,16 +302,20 @@ export function buildNature(scene, ctx) {
     colliders.add({ type: 'ell', x, y: y + h + 0.35 * s, z, rx: 1.75 * s, ry: 1.25 * s, rz: 1.75 * s, bottom: y + h - 0.7 * s, tag: 'tree' });
   };
 
-  const cardTree = (x, z, s = 1, big = false) => {
+  const cardTree = (x, z, s = 1, big = false, refined = null) => {
+    // Refined trees still consume their original random samples: removing those
+    // samples would relocate every grove, bush, flower and grass clump afterward.
+    const colliderStart = colliders.list.length;
     const y = H(x, z) - 0.25;
     const h = (big ? 9.5 : 5.5 + R() * 2.5) * s;
     const lean = (R() - 0.5) * 0.12;
     const stem = new THREE.QuadraticBezierCurve3(new THREE.Vector3(x, y, z),
       new THREE.Vector3(x - lean * h * 0.12, y + h * 0.4, z + lean * h * 0.18),
       new THREE.Vector3(x - lean * h * 0.56, y + h * 0.8, z + lean * h * 0.8));
-    trunkBatch.add(woodGeo(stem, (big ? 0.39 : 0.28) * s, (big ? 0.12 : 0.075) * s,
-      big || !lowWood ? 8 : 6, big || !lowWood ? 8 : 6, (big ? 0.075 : 0.09) * s, detailR() * 6), bark);
-    roots(x, y, z, s, 0.5 * s);
+    const barkPhase = detailR() * 6;
+    if (!refined) trunkBatch.add(woodGeo(stem, (big ? 0.39 : 0.28) * s, (big ? 0.12 : 0.075) * s,
+      big || !lowWood ? 8 : 6, big || !lowWood ? 8 : 6, (big ? 0.075 : 0.09) * s, barkPhase), bark);
+    roots(x, y, z, s, 0.5 * s, !refined);
     const tops = [];
     const nb = big ? 7 : 4 + Math.floor(R() * 2);
     for (let i = 0; i < nb; i++) {
@@ -319,30 +325,32 @@ export function buildNature(scene, ctx) {
       const p0 = stem.getPoint((hy - y) / (h * 0.8));
       const p2 = new THREE.Vector3(x + Math.cos(a) * len, hy + len * (0.45 + R() * 0.35), z + Math.sin(a) * len);
       const p1 = p0.clone().lerp(p2, 0.5).add(new THREE.Vector3(0, -0.3, 0));
-      trunkBatch.add(woodGeo(new THREE.QuadraticBezierCurve3(p0, p1, p2),
+      if (!refined) trunkBatch.add(woodGeo(new THREE.QuadraticBezierCurve3(p0, p1, p2),
         (big ? 0.18 : 0.1) * s, (big ? 0.03 : 0.018) * s, big || !lowWood ? 6 : 4, 5), bark);
       tops.push([p2, (big ? 2.6 : 1.7) * s * (0.85 + R() * 0.35)]);
     }
     tops.push([new THREE.Vector3(x, y + h * 0.95, z), (big ? 3.0 : 2.0) * s]);
     for (const [c, rc] of tops) {
-      foliage.add(c.x, c.y, c.z, rc * 0.78, rc * 0.62, rc * 0.78,
-        LEAF_GREENS[Math.floor(detailR() * 3)], R() * 6);
+      const color = LEAF_GREENS[Math.floor(detailR() * 3)], turn = R() * 6;
+      if (!refined) foliage.add(c.x, c.y, c.z, rc * 0.78, rc * 0.62, rc * 0.78, color, turn);
       const nl = Math.round(rc * rc * (big ? 34 : 38));
       for (let k = 0; k < nl; k++) {
         let px, py, pz;
         do { px = R() * 2 - 1; py = R() * 2 - 1; pz = R() * 2 - 1; } while (px * px + py * py + pz * pz > 1);
         const sc = 0.55 + R() * 0.5;
         tmpQ.setFromEuler(tmpE.set(R() * 6.28, R() * 6.28, R() * 6.28));
-        leafCards.push([c.x + px * rc, c.y + py * rc * 0.8, c.z + pz * rc, sc, tmpQ.clone(), 0.85 + R() * 0.3]);
+        const colorScale = 0.85 + R() * 0.3;
+        if (!refined) leafCards.push([c.x + px * rc, c.y + py * rc * 0.8, c.z + pz * rc, sc, tmpQ.clone(), colorScale]);
       }
     }
     colliders.add({ type: 'cyl', x, z, r: 0.5 * s, top: y + h * 0.45, bottom: y - 1, tag: 'tree' });
     for (const [c, rc] of tops) colliders.add({ type: 'ell', x: c.x, y: c.y + rc * 0.15, z: c.z, rx: rc * 0.85, ry: rc * 0.6, rz: rc * 0.85, bottom: c.y - rc * 0.45, tag: 'tree' });
+    if (refined) refinedTrees.push({ ...refined, x, z, s, oldColliders: colliders.list.slice(colliderStart) });
   };
 
   // big framing trees next to the spawn point
-  cardTree(spawn.x + 7.5, spawn.z + 3.5, 1.15, true);
-  cardTree(spawn.x + 4.5, spawn.z - 13, 1.0, true);
+  cardTree(spawn.x + 7.5, spawn.z + 3.5, 1.15, true, { id: 'spawn-apple', type: 'apple' });
+  cardTree(spawn.x + 4.5, spawn.z - 13, 1.0, true, { id: 'spawn-orange', type: 'orange' });
   // coast groves
   let placed = 0, tries = 0;
   const nCard = quality === 'low' ? 26 : 46;
@@ -565,5 +573,11 @@ export function buildNature(scene, ctx) {
     });
   }
 
+  // Keep the old scenery random calls and collision footprints during placement,
+  // then replace only these two trees' physics with their visible new silhouettes.
+  const orchard = buildSpawnFruitTrees(scene, refinedTrees, timeU, quality);
+  for (const tree of refinedTrees) for (const c of tree.oldColliders) c.off = true;
+  for (const c of orchard.solids) colliders.add(c);
+  out.fruitTrees = orchard.trees;
   return out;
 }

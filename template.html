@@ -824,6 +824,28 @@ html body.touch #pickups { left: auto; right: calc(56 * var(--s) + env(safe-area
    still be too wide (tabs) scroll sideways instead of pushing the layout; (4) safe-area insets on every edge; (5) close buttons
    keep a 38 px+ touch target. */
 @media (max-height: 520px) and (orientation: landscape) {
+  /* Keep the food grid beside its detail on touch phones: the narrow-width
+     stacked layout can leave no height for selectable items in landscape. */
+  body.touch #bag { padding: calc(8 * var(--s) + env(safe-area-inset-top, 0px)) calc(12 * var(--s) + env(safe-area-inset-right, 0px)) calc(8 * var(--s) + env(safe-area-inset-bottom, 0px)) calc(12 * var(--s) + env(safe-area-inset-left, 0px)); }
+  body.touch .bag-top { flex-wrap: nowrap; gap: calc(8 * var(--s)); }
+  body.touch .bag-title { flex: 0 0 auto; min-width: 0; gap: calc(5 * var(--s)); }
+  body.touch .bag-title b, body.touch .bag-title span { font-size: calc(16 * var(--s)); }
+  body.touch #bag-tabs { order: 0; flex: 1 1 0; min-width: 0; justify-content: center; gap: calc(3 * var(--s)); overflow-x: auto; overflow-y: hidden; padding-bottom: calc(7 * var(--s)); }
+  body.touch #bag-tabs .btab { flex: 0 0 auto; width: calc(36 * var(--s)); height: calc(36 * var(--s)); }
+  body.touch #bag-tabs .btab svg { width: calc(25 * var(--s)); height: calc(25 * var(--s)); }
+  body.touch .bag-right { flex-shrink: 0; gap: calc(8 * var(--s)); }
+  body.touch #bag-cap { display: none; }
+  body.touch #bag-close { width: 38px; height: 38px; }
+  body.touch .bag-body { grid-template-columns: minmax(0, 1fr) minmax(0, min(36vw, 290px)); grid-template-rows: minmax(0, 1fr); gap: calc(12 * var(--s)); }
+  body.touch .bag-gridwrap { min-width: 0; }
+  body.touch #bag-grid { grid-template-columns: repeat(auto-fill, minmax(calc(70 * var(--s)), 1fr)); gap: calc(8 * var(--s)); }
+  body.touch #bag-detail { min-width: 0; max-height: none; }
+  body.touch #bag-detail .bd-head { min-height: 0; padding: calc(10 * var(--s)); }
+  body.touch #bag-detail .bd-icon { width: calc(66 * var(--s)); height: calc(66 * var(--s)); }
+  body.touch #bag-detail .bd-ht h3 { font-size: calc(18 * var(--s)); }
+  body.touch #bag-detail .bd-body { padding: calc(8 * var(--s)) calc(10 * var(--s)); gap: calc(6 * var(--s)); line-height: 1.5; }
+  body.touch .bag-foot { padding-top: calc(6 * var(--s)); }
+  body.touch #bag-stats { display: none; }
   #gacha { gap: 6px; overflow: hidden; padding: calc(8px + env(safe-area-inset-top, 0px)) calc(12px + env(safe-area-inset-right, 0px)) calc(8px + env(safe-area-inset-bottom, 0px)) calc(12px + env(safe-area-inset-left, 0px)); }
   .gc-top { gap: 8px; flex-wrap: nowrap; min-width: 0; }
   .gc-title { min-width: 0; gap: 5px; } .gc-title svg { width: 20px; height: 20px; } .gc-title b { font-size: 16px; letter-spacing: .12em; white-space: nowrap; }

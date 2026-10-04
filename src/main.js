@@ -429,6 +429,13 @@ async function boot(saved = {}) {
       combat.breakables.push(n.breakable);
     }
   }
+  // Fruit anchors come from the actual branches, with stable keys across quality
+  // settings and reloads. Keep the existing gathering placement/random stream.
+  for (const tree of nat.fruitTrees || []) {
+    tree.fruits.forEach((p, i) => world.addNode(tree.type, p.x, p.z, {
+      y: p.y, key: `fruit:${tree.id}:${i}`,
+    }));
+  }
   world.onChange = () => {};
   let crystalSpots = [];
   {

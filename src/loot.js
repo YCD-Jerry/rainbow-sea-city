@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { ITEMS, RARITY_BG } from './items.js';
 import { buildChestModel } from './chests.js';
 import { bake } from './charmodel.js';
+import { createFruitMesh, isTreeFruit, FRUIT_REGROW_SECONDS } from './fruit.js';
 
 const CHEST = {
   common: { name: '普通的宝箱', body: '#b98a55', trim: '#d9d2c2', glow: '#ffffff' },
@@ -99,9 +100,20 @@ export class WorldItems {
   // ---------- gathering nodes ----------
   addNode(type, x, z, opts = {}) {
     const y = opts.y ?? this.ground(x, z, 999);
+    const hangingFruit = isTreeFruit(type);
+    const key = opts.key ?? (hangingFruit ? `fruit:${type}:${x}:${y}:${z}` : undefined);
+    if (hangingFruit) {
+      const existing = this.nodes.find((n) => n.hangingFruit && n.key === key);
+      if (existing) return existing;
+    }
     const g = new THREE.Group(); g.position.set(x, y, z);
-    const node = { kind: 'node', type, g, pos: g.position, key: opts.key, regrow: 0 };
-    if (type === 'berry') {
+    const node = { kind: 'node', type, g, pos: g.position, key, regrow: 0 };
+    if (hangingFruit) {
+      const mesh = createFruitMesh(type);
+      mesh.rotation.y = Math.sin(x * 1.7 + z * 0.8) * Math.PI;
+      g.add(mesh); node.vis = mesh; node.item = type; node.n = () => 1; node.name = ITEMS[type].name;
+      node.hangingFruit = true;
+    } else if (type === 'berry') {
       const leaf = new THREE.MeshLambertMaterial({ color: '#5fa834' });
       for (let i = 0; i < 3; i++) { const b = new THREE.Mesh(new THREE.IcosahedronGeometry(0.55, 1), leaf); b.position.set(Math.cos(i * 2.1) * 0.35, 0.45, Math.sin(i * 2.1) * 0.35); b.scale.set(1, 0.8, 1); b.castShadow = true; g.add(b); }
       const fruit = new THREE.Group(); const fm = new THREE.MeshStandardMaterial({ color: '#ff3f6c', emissive: '#a0102c', emissiveIntensity: 0.4, roughness: 0.3 });
@@ -132,8 +144,14 @@ export class WorldItems {
     }
     bake(g); // a bush of 12 parts becomes 2 draw calls
     this.scene.add(g);
-    const saved = this.save.nodes && this.save.nodes[opts.key];
-    if (saved && saved > Date.now()) { node.vis.visible = false; node.regrow = (saved - Date.now()) / 1000; if (node.breakable) node.breakable.broken = true; }
+    const saved = this.save.nodes && this.save.nodes[key];
+    if (hangingFruit) {
+      // The saved timestamp is authoritative: pausing or slow rendering cannot shorten the cooldown.
+      const now = Date.now(), latest = now + FRUIT_REGROW_SECONDS * 1000;
+      node.readyAt = Number.isSafeInteger(saved) && saved > 0 ? saved : 0;
+      if (node.readyAt > latest) { node.readyAt = latest; this.save.nodes[key] = latest; }
+      node.regrow = Math.max(0, (node.readyAt - now) / 1000); node.vis.visible = node.regrow === 0;
+    } else if (saved && saved > Date.now()) { node.vis.visible = false; node.regrow = (saved - Date.now()) / 1000; if (node.breakable) node.breakable.broken = true; }
     this.nodes.push(node);
     return node;
   }
@@ -205,6 +223,7 @@ export class WorldItems {
 
   // returns interactables within reach, sorted by distance
   update(dt, P, onCrystal) {
+    this.pickPlayer = P;
     this.time += dt;
     const out = [];
     const hue = (this.time * 0.15) % 1;
@@ -222,10 +241,14 @@ export class WorldItems {
       if (dist < 2.4 && Math.abs(d.g.position.y - P.y) < 2.2) out.push({ ref: d, dist, name: d.name, count: d.count, item: d.item });
     }
     for (const n of this.nodes) {
-      if (n.regrow > 0) { n.regrow -= dt; if (n.regrow <= 0) { n.vis.visible = true; if (n.breakable) { n.breakable.broken = false; n.breakable.hits = 0; } } continue; }
+      if (n.hangingFruit) {
+        n.regrow = Math.max(0, (n.readyAt - Date.now()) / 1000); n.vis.visible = n.regrow === 0;
+        if (n.regrow > 0) continue;
+      } else if (n.regrow > 0) { n.regrow -= dt; if (n.regrow <= 0) { n.vis.visible = true; if (n.breakable) { n.breakable.broken = false; n.breakable.hits = 0; } } continue; }
       if (n.breakable) continue;
       const dist = Math.hypot(n.pos.x - P.x, n.pos.z - P.z);
-      if (dist < 2.0 && Math.abs(n.pos.y - P.y) < 2) out.push({ ref: n, dist, name: n.name, item: ITEMS[n.item] });
+      const dy = n.pos.y - (P.y + (n.hangingFruit ? 1.1 : 0));
+      if (dist < 2.0 && Math.abs(dy) < (n.hangingFruit ? 1.9 : 2)) out.push({ ref: n, dist, name: n.name, item: ITEMS[n.item] });
     }
     for (const ch of this.chests) {
       if (ch.deco && ch.g.visible && !ch.opened) ch.deco(this.time);
@@ -268,6 +291,14 @@ export class WorldItems {
       return [[r.id, r.count]];
     }
     if (r.kind === 'node') {
+      if (r.hangingFruit) {
+        const now = Date.now(), P = this.pickPlayer;
+        if (!this.nodes.includes(r) || !r.vis.visible || r.readyAt > now) return null;
+        if (!P || !(Math.hypot(r.pos.x - P.x, r.pos.z - P.z) < 2.0 && Math.abs(r.pos.y - (P.y + 1.1)) < 1.9)) return null;
+        r.vis.visible = false; r.regrow = FRUIT_REGROW_SECONDS; r.readyAt = now + FRUIT_REGROW_SECONDS * 1000;
+        this.save.nodes = this.save.nodes || {}; this.save.nodes[r.key] = r.readyAt;
+        return [[r.item, 1]];
+      }
       r.vis.visible = false; r.regrow = r.type === 'shell' ? 240 : 300;
       if (r.key) { this.save.nodes = this.save.nodes || {}; this.save.nodes[r.key] = Date.now() + r.regrow * 1000; }
       return [[r.item, r.n()]];
