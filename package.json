@@ -1,0 +1,16 @@
+{
+  "name": "rainbow-sea-city",
+  "version": "14.4.0",
+  "private": true,
+  "description": "虹海之城：浏览器里的原神式 3D 开放世界（Three.js，单文件构建）",
+  "scripts": {
+    "build": "node build.mjs",
+    "build:dev": "DEV=1 node build.mjs"
+  },
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "playwright-core": "^1.63.0",
+    "three": "^0.165.0"
+  }
+}

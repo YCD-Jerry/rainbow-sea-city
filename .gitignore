@@ -1,0 +1,7 @@
+node_modules/
+dist/
+rainbow-sea-city.html
+test.html
+*.png
+.env
+.secrets/
