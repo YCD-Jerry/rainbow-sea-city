@@ -916,7 +916,10 @@ export class Player {
     m.tail.rotation.x = 0.25 + flow * 0.9 + Math.sin(t * 9) * 0.12 * (0.3 + flow);
     m.tail2.rotation.x = 0.2 + flow * 0.8 + Math.sin(t * 8 + 1) * 0.12 * (0.3 + flow);
     m.pony.rotation.x = 0.05 + flow * 0.45 + Math.sin(t * 6) * 0.05 * (0.4 + flow);
-    if (m.update) m.update(dt, t, flow, L.hip.rotation.x, R.hip.rotation.x);
+    if (m.update) m.update(dt, t, flow, L.hip.rotation.x, R.hip.rotation.x, {
+      mode, speed: hs, phase: this.phase, action: a, dead: this.dead,
+      holdingWeapon: !this.dead && (this.weaponShowT > 0 || this.infuse > 0 || this.aiming) && !['climb', 'swim', 'glide'].includes(mode),
+    });
     this.gliderT = lerpA(this.gliderT, mode === 'glide' ? 1 : 0, Math.min(1, dt * 10));
     m.glider.visible = this.gliderT > 0.02;
     m.glider.scale.setScalar(Math.max(0.001, this.gliderT));
