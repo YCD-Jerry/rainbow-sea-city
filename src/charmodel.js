@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { applyModelTrial } from './modeltrial.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // Anime-style character builder (original designs).
@@ -497,7 +498,7 @@ export function makeCharacter(look) {
   };
 
   bake(root);
-  return { root, pose, torso, head, tail, tail2, pony, L: LA, R: RA, glider, sword, bladeMat, update, headMesh };
+  return applyModelTrial({ root, pose, torso, head, tail, tail2, pony, L: LA, R: RA, glider, sword, bladeMat, update, headMesh }, typeof look === 'string' ? look : null);
 }
 
 // ---------- hair ----------
@@ -903,14 +904,16 @@ export function renderPortraits(ids) {
     r.setSize(256, 256, false); cam.aspect = 1; cam.fov = 20; cam.updateProjectionMatrix();
     const hy = m.root.scale.y * 1.56;
     cam.position.set(0.18, hy + 0.02, 1.25); cam.lookAt(0, hy - 0.04, 0);
+    m.syncPose?.();
     r.setClearColor(0x000000, 0); r.render(scene, cam); res.bust = r.domElement.toDataURL('image/png');
     // full body, slight contrapposto
     m.L.sh.rotation.z = 0.18; m.R.sh.rotation.z = -0.25; m.R.el.rotation.x = -0.4; m.L.hip.rotation.x = 0.1; m.R.kn.rotation.x = 0.15;
     r.setSize(360, 640, false); cam.aspect = 360 / 640; cam.fov = 26; cam.updateProjectionMatrix();
     cam.position.set(0.5, 1.0, 4.0); cam.lookAt(0, 0.92 * m.root.scale.y, 0);
+    m.syncPose?.();
     r.render(scene, cam); res.full = r.domElement.toDataURL('image/png');
     scene.remove(m.root);
-    m.root.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+    m.root.traverse((o) => { if (o.geometry && !o.userData.trialShared) o.geometry.dispose(); });
     out[id] = res;
   }
   r.dispose(); try { r.forceContextLoss(); } catch (e) { /* ignore */ }

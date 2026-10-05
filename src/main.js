@@ -33,6 +33,7 @@ import { renderPortraits } from './charmodel.js';
 import { setPortraits, portrait } from './ui.js';
 import { WorldMap, MAP_ICONS } from './map.js';
 import { rng } from './noise.js';
+import { prepareModelTrial, trial } from './modeltrial.js';
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -45,6 +46,8 @@ const tick = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 
 const COMPANION = ['今天想去哪里？', '听说光穿过水幕会变成彩虹，要试试吗？', '针塔岛上的宝箱好像特别华丽……', '累了就去虹之像旁边歇一会儿吧。', '左上角的小地图会显示附近的魔物。'];
 
 async function boot(saved = {}) {
+  $('loadlabel').textContent = '正在从官方地址加载试玩外观…';
+  await prepareModelTrial();
   let quality = store.get('quality', isTouch ? 'mid' : 'high');
   const setProgress = (p, label) => {
     $('golabel').textContent = `正在生成世界 ${Math.round(p * 100)}%`;
@@ -1998,7 +2001,7 @@ async function boot(saved = {}) {
   ach.quiet = false;
   setProgress(1, '');
   let ready = true;
-  $('go').disabled = false; $('golabel').textContent = '开始探索'; $('loadlabel').textContent = '';
+  $('go').disabled = false; $('golabel').textContent = '开始探索'; $('loadlabel').textContent = trial.state === 'ready' ? trial.credit : trial.state === 'fallback' ? '试玩外观未加载，已使用原创模型' : '';
   $('start').classList.add('ready');
   if (saved.started) startGame();
   if (/debug/.test(location.search)) window.__dbg = { getComposer: () => composer, dayNight, openTime, quitChallenge, tick: (n, dt = 0.05) => { for (let i = 0; i < n; i++) { puzzles.update(time + i * dt, dt); updateDrones(dt); } }, ach, puzzles, drones, ACH, story, skipCine: () => cineSkip(), dlgAdvance, dlgChoose, chapterDone: () => chapterDone(), dlgState: () => dlg, lockRef, guide, beams, overlayName: () => overlay, renderer, camera, notice, setCam: (c) => { dbgCam = c; }, H, colliders, scene, cityPlan, city, gscene, syncModels, applyWeapons, player, cam, inp, teleportTo, WP, combat, world, inv, ui, fx, setOverlay, wmap, statues, D, enterDomain, startChallenge, claimReward, leaveDomain, domainInteract, dent, arena, save, refreshArt, domainWP, wpPos };
